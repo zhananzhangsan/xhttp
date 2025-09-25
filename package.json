@@ -4,7 +4,7 @@
   "description": "nodejs",
   "author": "",
   "repository": "",
-  "license": "",
+  "license": "MIT",
   "private": false,
   "main": "app.js",
   "scripts": {
