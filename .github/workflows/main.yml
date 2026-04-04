@@ -1,6 +1,10 @@
 name: "Build and push images"
 on:
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 强制使用 Node.js 24
+
 jobs:
   Building:
       runs-on: ubuntu-latest
