@@ -8,9 +8,7 @@
   "private": false,
   "main": "app.js",
   "scripts": {
-    "dev": "node --expose-gc app.js",
-    "start": "node --expose-gc app.js",
-    "debug": "LOG_LEVEL=debug node --expose-gc app.js"
+    "start": "node app.js"
   },
   "dependencies": {
     "axios": "^1.9.0"
