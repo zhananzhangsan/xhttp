@@ -1,8 +1,13 @@
-FROM node:20-alpine
-WORKDIR /app
-COPY app.js package.json ./
+FROM node:alpine3.20
+
+WORKDIR /tmp
+
+COPY app.js index.html package.json ./
+
 EXPOSE 3000
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV NODE_OPTIONS=--max-old-space-size=256
-CMD ["node", "app.js"]
+
+RUN apk add --no-cache curl bash && \
+    npm install && \
+    chmod +x app.js
+
+CMD ["npm", "start"]
