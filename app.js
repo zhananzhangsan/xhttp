@@ -546,6 +546,7 @@ class Session {
         this.initialized = false;
         this.responseHeader = null;
         this.headerSent = false;
+        this.downstreamPiped = false;
         this.bufferedData = new Map();
         this.cleaned = false;
         this.pendingPackets = [];  // 存储待处理的数据包
@@ -637,60 +638,6 @@ class Session {
         }
     }
 
-    _startDownstreamResponse() {
-        if (!this.currentStreamRes || !this.responseHeader) return;
-        
-        try {
-            const protocol = this.currentStreamRes.socket?.alpnProtocol || 'http/1.1';
-            const isH2 = protocol === 'h2';
-
-            if (!this.headerSent) {
-                log('debug', `Sending VLESS response header (${protocol}): ${this.responseHeader.length} bytes`);
-                this.currentStreamRes.write(this.responseHeader);
-                this.headerSent = true;
-            }
-            
-            // 根据协议使用不同的传输策略
-            if (isH2) {
-                // HTTP/2 优化
-                this.currentStreamRes.socket.setNoDelay(true);
-                
-                // 使用 Transform 流进行数据分块
-                const transform = new require('stream').Transform({
-                    transform(chunk, encoding, callback) {
-                        const size = 16384; // 16KB chunks
-                        for (let i = 0; i < chunk.length; i += size) {
-                            this.push(chunk.slice(i, i + size));
-                        }
-                        callback();
-                    }
-                });
-                
-                this.remote.pipe(transform).pipe(this.currentStreamRes);
-            } else {
-                // HTTP/1.1 直接传输
-                this.remote.pipe(this.currentStreamRes);
-            }
-            
-            // 处理关闭事件
-            this.remote.on('end', () => {
-                if (!this.currentStreamRes.writableEnded) {
-                    this.currentStreamRes.end();
-                }
-            });
-            
-            this.remote.on('error', (err) => {
-                log('error', `Remote error: ${err.message}`);
-                if (!this.currentStreamRes.writableEnded) {
-                    this.currentStreamRes.end();
-                }
-            });
-        } catch (err) {
-            log('error', `Error starting downstream: ${err.message}`);
-            this.cleanup();
-        }
-    }
-
     startDownstream(res, headers) {
         if (!res.headersSent) {
             res.writeHead(200, headers);
@@ -728,23 +675,25 @@ class Session {
     }
 
     _startDownstreamResponse() {
-        if (!this.currentStreamRes || !this.responseHeader) return;
-        
+        if (!this.currentStreamRes || !this.responseHeader || !this.remote) return;
+        if (this.downstreamPiped) return;
+
         try {
             if (!this.headerSent) {
                 this.currentStreamRes.write(this.responseHeader);
                 this.headerSent = true;
             }
-            
+
+            this.downstreamPiped = true;
             this.remote.pipe(this.currentStreamRes);
-            
-            this.remote.on('end', () => {
+
+            this.remote.once('end', () => {
                 if (!this.currentStreamRes.writableEnded) {
                     this.currentStreamRes.end();
                 }
             });
-            
-            this.remote.on('error', (err) => {
+
+            this.remote.once('error', (err) => {
                 log('error', `Remote error: ${err.message}`);
                 if (!this.currentStreamRes.writableEnded) {
                     this.currentStreamRes.end();
@@ -756,6 +705,7 @@ class Session {
         }
     }
 
+
     cleanup() {
         if (!this.cleaned) {
             this.cleaned = true;
@@ -766,6 +716,7 @@ class Session {
             }
             this.initialized = false;
             this.headerSent = false;
+            this.downstreamPiped = false;
         }
     }
 } 
