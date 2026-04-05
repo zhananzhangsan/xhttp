@@ -16,22 +16,23 @@ const AUTO_ACCESS = process.env.AUTO_ACCESS || false;      // 是否开启自动
 const XPATH = process.env.XPATH || UUID.slice(0, 8);       // xhttp路径,自动获取uuid前8位
 const SUB_PATH = process.env.SUB_PATH || `${UUID}`;        // 节点订阅路径,默认位uuid
 const DOMAIN = process.env.DOMAIN || '';                   // 域名或ip,留空将自动获取服务器ip
-const NAME = process.env.NAME || 'Hug';                    // 节点名称
-const PORT = process.env.PORT || 7860;                     // http服务                   
+const NAME = process.env.NAME || '';                    // 节点名称
+const PORT = process.env.PORT || 3000;                     // http服务                   
 
 // 核心配置
 const SETTINGS = {
-    ['UUID']: UUID,              
-    ['LOG_LEVEL']: 'none',       // 日志级别,调试使用,none,info,warn,error
-    ['BUFFER_SIZE']: '2048',     // 增加缓冲区大小
-    ['XPATH']: `%2F${XPATH}`,    // xhttp路径 
-    ['MAX_BUFFERED_POSTS']: 30,  // 最大缓存POST请求数
-    ['MAX_POST_SIZE']: 1000000,  // 每个POST最大字节数(1MB)
-    ['SESSION_TIMEOUT']: 30000,  // 会话超时时间(30秒)
-    ['CHUNK_SIZE']: 1024 * 1024, // 1024KB 的数据块大小
-    ['TCP_NODELAY']: true,       // 启用 TCP_NODELAY
-    ['TCP_KEEPALIVE']: true,     // 启用 TCP keepalive
+    UUID: UUID,
+    LOG_LEVEL: 'none',
+    BUFFER_SIZE: '64',
+    XPATH: `%2F${XPATH}`,
+    MAX_BUFFERED_POSTS: 12,
+    MAX_POST_SIZE: 512 * 1024,
+    SESSION_TIMEOUT: 15000,
+    CHUNK_SIZE: 16 * 1024,
+    TCP_NODELAY: true,
+    TCP_KEEPALIVE: true,
 }
+
 
 function validate_uuid(left, right) {
     for (let i = 0; i < 16; i++) {
@@ -344,10 +345,8 @@ async function connect_remote(hostname, port) {
         
         // 优化 TCP 连接
         conn.setNoDelay(true);  // 启用 TCP_NODELAY
-        conn.setKeepAlive(true, 1000);  // 启用 TCP keepalive
+        conn.setKeepAlive(true, 3000);  // 启用 TCP keepalive
         
-        // 设置缓冲区大小
-        conn.bufferSize = parseInt(SETTINGS.BUFFER_SIZE) * 1024;
         
         log('info', `Connected to ${hostname}:${port}`);
         return conn;
@@ -799,7 +798,7 @@ const server = http.createServer((req, res) => {
         'Access-Control-Allow-Methods': 'GET, POST',
         'Cache-Control': 'no-store',
         'X-Accel-Buffering': 'no',
-        'X-Padding': generatePadding(100, 1000),
+        'X-Padding': generatePadding(32, 128),
     };
 
     // 根路径和订阅路径
@@ -941,8 +940,12 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 620000; 
-server.headersTimeout = 625000;   
+server.keepAliveTimeout = 20000;
+server.headersTimeout = 25000;
+server.requestTimeout = 45000;
+server.timeout = 45000;
+server.maxConnections = 100;
+  
 
 server.on('error', (err) => {
     log('error', `Server error: ${err.message}`);
