@@ -25,9 +25,9 @@ const SETTINGS = {
     LOG_LEVEL: 'none',
     BUFFER_SIZE: '256',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 16,
+    MAX_BUFFERED_POSTS: 32,
     MAX_POST_SIZE: 512 * 1024,
-    SESSION_TIMEOUT: 4000,
+    SESSION_TIMEOUT: 5000,
     CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
@@ -400,7 +400,7 @@ function pipe_relay() {
                 src.pause();
                 src.pipe(dest, {
                     end: true,
-                    highWaterMark: 64 * 1024
+                    highWaterMark: 128 * 1024
                 });
                 src.resume();
             } else {
