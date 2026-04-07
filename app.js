@@ -25,10 +25,10 @@ const SETTINGS = {
     LOG_LEVEL: 'none',
     BUFFER_SIZE: '256',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 32,
-    MAX_POST_SIZE: 1024 * 1024,
-    SESSION_TIMEOUT: 3000,
-    CHUNK_SIZE: 64 * 1024,
+    MAX_BUFFERED_POSTS: 20,
+    MAX_POST_SIZE: 512 * 1024,
+    SESSION_TIMEOUT: 15000,
+    CHUNK_SIZE: 48 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
 }
@@ -400,7 +400,7 @@ function pipe_relay() {
                 src.pause();
                 src.pipe(dest, {
                     end: true,
-                    highWaterMark: 128 * 1024
+                    highWaterMark: 64 * 1024
                 });
                 src.resume();
             } else {
@@ -891,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 30000;
-server.headersTimeout = 35000;
-server.requestTimeout = 60000;
-server.timeout = 60000;
-server.maxConnections = 50;
+server.keepAliveTimeout = 20000;
+server.headersTimeout = 25000;
+server.requestTimeout = 30000;
+server.timeout = 30000;
+server.maxConnections = 15;
   
 
 server.on('error', (err) => {
