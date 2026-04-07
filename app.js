@@ -23,12 +23,12 @@ const PORT = process.env.PORT || 3000;                     // http服务
 const SETTINGS = {
     UUID: UUID,
     LOG_LEVEL: 'none',
-    BUFFER_SIZE: '64',
+    BUFFER_SIZE: '256',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 12,
-    MAX_POST_SIZE: 512 * 1024,
-    SESSION_TIMEOUT: 15000,
-    CHUNK_SIZE: 16 * 1024,
+    MAX_BUFFERED_POSTS: 32,
+    MAX_POST_SIZE: 1024 * 1024,
+    SESSION_TIMEOUT: 3000,
+    CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
 }
@@ -345,7 +345,7 @@ async function connect_remote(hostname, port) {
         
         // 优化 TCP 连接
         conn.setNoDelay(true);  // 启用 TCP_NODELAY
-        conn.setKeepAlive(true, 3000);  // 启用 TCP keepalive
+        conn.setKeepAlive(true, 10000);  // 启用 TCP keepalive
         
         
         log('info', `Connected to ${hostname}:${port}`);
@@ -400,7 +400,7 @@ function pipe_relay() {
                 src.pause();
                 src.pipe(dest, {
                     end: true,
-                    highWaterMark: chunkSize
+                    highWaterMark: 128 * 1024
                 });
                 src.resume();
             } else {
@@ -891,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 20000;
-server.headersTimeout = 25000;
-server.requestTimeout = 45000;
-server.timeout = 45000;
-server.maxConnections = 100;
+server.keepAliveTimeout = 30000;
+server.headersTimeout = 35000;
+server.requestTimeout = 60000;
+server.timeout = 60000;
+server.maxConnections = 50;
   
 
 server.on('error', (err) => {
