@@ -23,11 +23,11 @@ const PORT = process.env.PORT || 3000;                     // http服务
 const SETTINGS = {
     UUID: UUID,
     LOG_LEVEL: 'none',
-    BUFFER_SIZE: '4096',
+    BUFFER_SIZE: '64 * 1024',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 12,
-    MAX_POST_SIZE: 384 * 1024,
-    SESSION_TIMEOUT: 30000,
+    MAX_BUFFERED_POSTS: 30,
+    MAX_POST_SIZE: 512 * 1024,
+    SESSION_TIMEOUT: 45000,
     CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
@@ -895,7 +895,7 @@ server.keepAliveTimeout = 60000;
 server.headersTimeout = 90000;
 server.requestTimeout = 180000;
 server.timeout = 180000;
-server.maxConnections = 1000;
+server.maxConnections = 200;
   
 
 server.on('error', (err) => {
