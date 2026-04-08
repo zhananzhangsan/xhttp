@@ -891,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 15000;
+server.keepAliveTimeout = 20000;
 server.headersTimeout = 25000;
 server.requestTimeout = 30000;
 server.timeout = 30000;
-server.maxConnections = 20;
+server.maxConnections = 50;
   
 
 server.on('error', (err) => {
