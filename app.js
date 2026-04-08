@@ -23,12 +23,12 @@ const PORT = process.env.PORT || 3000;                     // http服务
 const SETTINGS = {
     UUID: UUID,
     LOG_LEVEL: 'none',
-    BUFFER_SIZE: '96',
+    BUFFER_SIZE: '4096',
     XPATH: `%2F${XPATH}`,
     MAX_BUFFERED_POSTS: 12,
     MAX_POST_SIZE: 384 * 1024,
-    SESSION_TIMEOUT: 15000,
-    CHUNK_SIZE: 32 * 1024,
+    SESSION_TIMEOUT: 30000,
+    CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
 }
@@ -381,7 +381,7 @@ function pipe_relay() {
         
         if (first_packet.length > 0) {
             if (dest.write) {
-                dest.cork(); // 合并多个小数据包
+                dest.cork();
                 dest.write(first_packet);
                 process.nextTick(() => dest.uncork());
             } else {
@@ -396,15 +396,30 @@ function pipe_relay() {
         
         try {
             if (src.pipe) {
-                // 优化 Node.js Stream
-                src.pause();
-                src.pipe(dest, {
-                    end: true,
-                    highWaterMark: chunkSize
+                // 替换 pipe 为手动流控
+                src.on('data', (chunk) => {
+                    if (!dest.write(chunk)) {
+                        src.pause();
+                    }
                 });
-                src.resume();
+
+                dest.on('drain', () => {
+                    src.resume();
+                });
+
+                src.on('end', () => {
+                    if (dest.end) dest.end();
+                });
+
+                src.on('error', () => {
+                    dest.destroy();
+                });
+
+                dest.on('error', () => {
+                    src.destroy();
+                });
+
             } else {
-                // 优化 Web Stream
                 await src.readable.pipeTo(dest.writable, {
                     preventClose: false,
                     preventAbort: false,
@@ -891,10 +906,10 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 15000;
-server.headersTimeout = 20000;
-server.requestTimeout = 30000;
-server.timeout = 30000;
+server.keepAliveTimeout = 300000;
+server.headersTimeout = 60000;
+server.requestTimeout = 300000;
+server.timeout = 300000;
 server.maxConnections = 60;
   
 
