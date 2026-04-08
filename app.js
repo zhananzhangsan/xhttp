@@ -895,7 +895,7 @@ server.keepAliveTimeout = 15000;
 server.headersTimeout = 20000;
 server.requestTimeout = 30000;
 server.timeout = 30000;
-server.maxConnections = 60;
+server.maxConnections = 80;
   
 
 server.on('error', (err) => {
