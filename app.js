@@ -381,7 +381,7 @@ function pipe_relay() {
         
         if (first_packet.length > 0) {
             if (dest.write) {
-                dest.cork();
+                dest.cork(); // 合并多个小数据包
                 dest.write(first_packet);
                 process.nextTick(() => dest.uncork());
             } else {
@@ -396,30 +396,15 @@ function pipe_relay() {
         
         try {
             if (src.pipe) {
-                // 替换 pipe 为手动流控
-                src.on('data', (chunk) => {
-                    if (!dest.write(chunk)) {
-                        src.pause();
-                    }
+                // 优化 Node.js Stream
+                src.pause();
+                src.pipe(dest, {
+                    end: true,
+                    highWaterMark: chunkSize
                 });
-
-                dest.on('drain', () => {
-                    src.resume();
-                });
-
-                src.on('end', () => {
-                    if (dest.end) dest.end();
-                });
-
-                src.on('error', () => {
-                    dest.destroy();
-                });
-
-                dest.on('error', () => {
-                    src.destroy();
-                });
-
+                src.resume();
             } else {
+                // 优化 Web Stream
                 await src.readable.pipeTo(dest.writable, {
                     preventClose: false,
                     preventAbort: false,
