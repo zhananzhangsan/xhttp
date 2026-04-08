@@ -27,8 +27,8 @@ const SETTINGS = {
     XPATH: `%2F${XPATH}`,
     MAX_BUFFERED_POSTS: 12,
     MAX_POST_SIZE: 384 * 1024,
-    SESSION_TIMEOUT: 15000,
-    CHUNK_SIZE: 32 * 1024,
+    SESSION_TIMEOUT: 30000,
+    CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
 }
@@ -891,10 +891,10 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 15000;
-server.headersTimeout = 20000;
-server.requestTimeout = 30000;
-server.timeout = 30000;
+server.keepAliveTimeout = 60000;
+server.headersTimeout = 75000;
+server.requestTimeout = 120000;
+server.timeout = 120000;
 server.maxConnections = 80;
   
 
