@@ -27,7 +27,7 @@ const SETTINGS = {
     XPATH: `%2F${XPATH}`,
     MAX_BUFFERED_POSTS: 12,
     MAX_POST_SIZE: 384 * 1024,
-    SESSION_TIMEOUT: 30000,
+    SESSION_TIMEOUT: 20000,
     CHUNK_SIZE: 32 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
@@ -361,9 +361,8 @@ function timed_connect(hostname, port, ms) {
     return new Promise((resolve, reject) => {
         const conn = net.createConnection({ host: hostname, port: port })
         const handle = setTimeout(() => {
-            conn.destroy();
-            reject(new Error(`connect timeout`));
-        }, ms);
+            reject(new Error(`connect timeout`))
+        }, ms)
         conn.on('connect', () => {
             clearTimeout(handle)
             resolve(conn)
@@ -535,7 +534,6 @@ function relay(cfg, client, remote, vless) {
 
 // 会话管理
 const sessions = new Map();
-const MAX_SESSIONS = 20;
 
 class Session {
     constructor(uuid) {
@@ -555,10 +553,6 @@ class Session {
         this.currentStreamRes = null; // 当前下行流响应
         this.pendingBuffers = new Map(); // 存储未按序到达的数据包
         log('debug', `Created new session with UUID: ${uuid}`);
-    }
-
-    updateActivity() {
-        this.lastActivity = Date.now();
     }
 
     async initializeVLESS(firstPacket) {
@@ -602,7 +596,6 @@ class Session {
             
             // 按序处理数据包
             while (this.pendingBuffers.has(this.nextSeq)) {
-                this.updateActivity();
                 const nextData = this.pendingBuffers.get(this.nextSeq);
                 this.pendingBuffers.delete(this.nextSeq);
                 
@@ -665,8 +658,6 @@ class Session {
     }
 
     async _writeToRemote(data) {
-        this.updateActivity();
-
         if (!this.remote || this.remote.destroyed) {
             throw new Error('Remote connection not available');
         }
@@ -719,23 +710,10 @@ class Session {
         if (!this.cleaned) {
             this.cleaned = true;
             log('debug', `Cleaning up session ${this.uuid}`);
-
-            try {
-                if (this.remote) {
-                    this.remote.destroy();
-                    this.remote = null;
-                }
-            } catch (e) {}
-
-            try {
-                if (this.currentStreamRes && !this.currentStreamRes.writableEnded) {
-                    this.currentStreamRes.end();
-                }
-            } catch (e) {}
-            this.pendingBuffers.clear();
-            this.bufferedData.clear();
-            this.pendingPackets = [];
-
+            if (this.remote) {
+                this.remote.destroy();
+                this.remote = null;
+            }
             this.initialized = false;
             this.headerSent = false;
             this.downstreamPiped = false;
@@ -814,20 +792,12 @@ const server = http.createServer((req, res) => {
 
         let session = sessions.get(uuid);
         if (!session) {
-            if (sessions.size >= MAX_SESSIONS) {
-                log('warn', `Too many sessions: ${sessions.size}`);
-                res.writeHead(503);
-                res.end("Server busy");
-                return;
-            }
-            
             session = new Session(uuid);
             sessions.set(uuid, session);
             log('info', `Created new session for GET: ${uuid}`);
         }
 
         session.downstreamStarted = true;
-        session.updateActivity();
         
         if (!session.startDownstream(res, headers)) {
             log('error', `Failed to start downstream for session: ${uuid}`);
@@ -845,12 +815,6 @@ const server = http.createServer((req, res) => {
     if (req.method === 'POST' && seq !== null) {
         let session = sessions.get(uuid);
         if (!session) {
-            if (sessions.size >= MAX_SESSIONS) {
-                log('warn', `Too many sessions: ${sessions.size}`);
-                res.writeHead(503);
-                res.end("Server busy");
-                return;
-            }
             session = new Session(uuid);
             sessions.set(uuid, session);
             log('info', `Created new session for POST: ${uuid}`);
@@ -889,7 +853,6 @@ const server = http.createServer((req, res) => {
                 const buffer = Buffer.concat(data);
                 log('info', `Processing packet: seq=${seq}, size=${buffer.length}`);
                 
-                session.updateActivity();
                 await session.processPacket(seq, buffer);
                 
                 if (!headersSent) {
@@ -928,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 15000;
-server.headersTimeout = 20000;
-server.requestTimeout = 30000;
-server.timeout = 30000;
-server.maxConnections = 40;
+server.keepAliveTimeout = 25000;
+server.headersTimeout = 30000;
+server.requestTimeout = 60000;
+server.timeout = 60000;
+server.maxConnections = 60;
   
 
 server.on('error', (err) => {
@@ -942,33 +905,6 @@ server.on('error', (err) => {
 const delFiles = () => {
     ['npm', 'config.yaml'].forEach(file => fs.unlink(file, () => {}));
 };
-
-setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-
-    for (const [id, s] of sessions) {
-        if (!s || s.cleaned) {
-            sessions.delete(id);
-            continue;
-        }
-
-        if (now - s.lastActivity > SETTINGS.SESSION_TIMEOUT) {
-            log('debug', `Session expired: ${id}`);
-
-            try {
-                s.cleanup();
-            } catch (e) {}
-
-            sessions.delete(id);
-            cleaned++;
-        }
-    }
-
-    if (cleaned > 0) {
-        log('info', `Cleaned ${cleaned} expired sessions`);
-    }
-}, 10000);
 
 server.listen(PORT, () => {
     runnz ();
