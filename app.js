@@ -560,7 +560,6 @@ class Session {
     updateActivity() {
         this.lastActivity = Date.now();
     }
-}
 
     async initializeVLESS(firstPacket) {
         if (this.initialized) return true;
