@@ -7,7 +7,6 @@ jobs:
       runs-on: ubuntu-latest
       name: "Build xhttp images"
       env:
-        FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         DOCKERHUB_REPOSITORY: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_REPO }}:latest
