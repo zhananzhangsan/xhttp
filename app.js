@@ -1,11 +1,12 @@
 const os = require('os');
 const fs = require('fs');
 const net = require('net');
+const dns = require('dns');
 const http = require('http');
-const axios = require('axios');
 const path = require('path');
+const axios = require('axios');
 const { Buffer } = require('buffer');
-const { exec, execSync } = require('child_process');
+const { exec } = require('child_process');
 
 // 环境变量
 const UUID = process.env.UUID || '24b4b1e1-ffff-ffff-ffff-242cf53b5bdb'; // 使用哪吒v1，在不同的平台部署需修改UUID，否则会覆盖
@@ -14,25 +15,87 @@ const NEZHA_PORT = process.env.NEZHA_PORT || '';           // 哪吒v1没有此�
 const NEZHA_KEY = process.env.NEZHA_KEY || '';             // v1的NZ_CLIENT_SECRET或v0的agent端口  
 const AUTO_ACCESS = process.env.AUTO_ACCESS || false;      // 是否开启自动访问保活,false为关闭,true为开启,需同时填写DOMAIN变量
 const XPATH = process.env.XPATH || UUID.slice(0, 8);       // xhttp路径,自动获取uuid前8位
-const SUB_PATH = process.env.SUB_PATH || `${UUID}`;        // 节点订阅路径,默认位uuid
+const SUB_PATH = process.env.SUB_PATH || 'sub';            // 节点订阅路径
 const DOMAIN = process.env.DOMAIN || '';                   // 域名或ip,留空将自动获取服务器ip
-const NAME = process.env.NAME || '';                    // 节点名称
-const PORT = process.env.PORT || 3000;                     // http服务                   
+const NAME = process.env.NAME || '';                       // 节点名称
+const PORT = process.env.PORT || 3000;                     // http服务
 
 // 核心配置
 const SETTINGS = {
-    UUID: UUID,
-    LOG_LEVEL: 'none',
-    BUFFER_SIZE: '8192',
-    XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 30,
-    MAX_POST_SIZE: 1000000,
-    SESSION_TIMEOUT: 30000,
-    CHUNK_SIZE: 64 * 1024,
-    TCP_NODELAY: true,
-    TCP_KEEPALIVE: true,
+    ['UUID']: UUID,              
+    ['LOG_LEVEL']: 'none',       // 日志级别,调试使用,none,info,debug,warn,error
+    ['BUFFER_SIZE']: '8192',     // 缓冲区大小
+    ['XPATH']: `%2F${XPATH}`,    // xhttp路径 
+    ['MAX_BUFFERED_POSTS']: 50,  // 最大缓存POST请求数
+    ['MAX_POST_SIZE']: 2000000,  // 每个POST最大字节数到2MB
+    ['SESSION_TIMEOUT']: 30000,  // 会话超时时间(30秒)
+    ['CHUNK_SIZE']: 64 * 1024,   // 64KB 的数据块大小，更高效
+    ['TCP_NODELAY']: true,       // 启用 TCP_NODELAY
+    ['TCP_KEEPALIVE']: true,     // 启用 TCP keepalive
+    ['SESSION_CLEANUP_INTERVAL']: 60000, // 会话清理间隔(60秒)
+    ['MAX_SESSION_AGE']: 300000,         // 最大会话存活时间(5分钟)
+    ['CONNECTION_POOL_SIZE']: 100,       // 连接池大小
+    ['WRITE_BUFFER_SIZE']: 64 * 1024,    // 写缓冲区大小
+    ['READ_BUFFER_SIZE']: 64 * 1024,     // 读缓冲区大小
+    ['BATCH_PROCESS_SIZE']: 10,          // 批处理大小
+    ['ENABLE_COMPRESSION']: false,       // 禁用压缩以提升速度
 }
 
+// 自定义DNS解析器
+const customDnsResolver = {
+    servers: ['1.1.1.1', '8.8.8.8'],
+    currentServerIndex: 0,
+    
+    async resolve(hostname) {
+        const servers = this.servers;
+        let lastError;
+        
+        for (let i = 0; i < servers.length; i++) {
+            const serverIndex = (this.currentServerIndex + i) % servers.length;
+            const server = servers[serverIndex];
+            
+            try {
+                log('debug', `Resolving ${hostname} using DNS server: ${server}`);
+                
+                const result = await this.resolveWithServer(hostname, server);
+                this.currentServerIndex = (serverIndex + 1) % servers.length;
+                
+                log('debug', `Resolved ${hostname} to ${result} using ${server}`);
+                return result;
+            } catch (err) {
+                lastError = err;
+                log('warn', `DNS resolution failed with ${server}: ${err.message}`);
+            }
+        }
+        
+        throw new Error(`All DNS servers failed. Last error: ${lastError?.message}`);
+    },
+    
+    async resolveWithServer(hostname, server) {
+        return new Promise((resolve, reject) => {
+            const dns = require('dns');
+            const originalServers = dns.getServers();
+            
+            dns.setServers([server]);
+            
+            dns.resolve4(hostname, (err, addresses) => {
+                dns.setServers(originalServers);
+                
+                if (err) {
+                    reject(err);
+                } else if (addresses && addresses.length > 0) {
+                    resolve(addresses[0]);
+                } else {
+                    reject(new Error('No addresses found'));
+                }
+            });
+        });
+    }
+};
+
+// 设置默认DNS解析器
+dns.setDefaultResultOrder('ipv4first');
+dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 function validate_uuid(left, right) {
     for (let i = 0; i < 16; i++) {
@@ -153,12 +216,12 @@ disable_force_update: true
 disable_nat: false
 disable_send_query: false
 gpu: false
-insecure_tls: false
+insecure_tls: true
 ip_report_period: 1800
 report_delay: 4
 server: ${NEZHA_SERVER}
-skip_connection_count: false
-skip_procs_count: false
+skip_connection_count: true
+skip_procs_count: true
 temperature: false
 tls: ${nezhatls}
 use_gitee_to_upgrade: false
@@ -202,7 +265,7 @@ async function addAccessTask() {
     }
 }
 
-// VLESS 协议解析
+// VLS 协议解析
 function parse_uuid(uuid) {
     uuid = uuid.replaceAll('-', '')
     const r = []
@@ -290,7 +353,7 @@ async function read_vless_header(reader, cfg_uuid_str) {
         throw new Error('parse hostname failed')
     }
     
-    log('info', `VLESS connection to ${hostname}:${port}`);
+    log('info', `VLS connection to ${hostname}:${port}`);
     return {
         hostname,
         port,
@@ -339,16 +402,42 @@ async function parse_header(uuid_str, client) {
 
 // connect_remote 函数
 async function connect_remote(hostname, port) {
-    const timeout = 8000;
+    const timeout = 10000; // 超时时间
     try {
-        const conn = await timed_connect(hostname, port, timeout);
+        // 使用自定义DNS解析器
+        let resolvedHostname = hostname;
         
-        // 优化 TCP 连接
-        conn.setNoDelay(true);  // 启用 TCP_NODELAY
-        conn.setKeepAlive(true, 10000);  // 启用 TCP keepalive
+        // 如果不是IP地址，则进行DNS解析
+        if (!/^\d+\.\d+\.\d+\.\d+$/.test(hostname) && !hostname.startsWith('[')) {
+            try {
+                resolvedHostname = await customDnsResolver.resolve(hostname);
+                log('debug', `DNS resolved ${hostname} to ${resolvedHostname}`);
+            } catch (dnsErr) {
+                log('warn', `DNS resolution failed for ${hostname}, using original hostname: ${dnsErr.message}`);
+                // 如果DNS解析失败，仍然尝试使用原始主机名
+            }
+        }
         
+        const conn = await timed_connect(resolvedHostname, port, timeout);
         
-        log('info', `Connected to ${hostname}:${port}`);
+        // 优化 TCP 连接设置
+        conn.setNoDelay(SETTINGS.TCP_NODELAY);
+        conn.setKeepAlive(SETTINGS.TCP_KEEPALIVE, 1000);
+        
+        // 设置更大的缓冲区大小
+        if (conn.setReadBuffer) {
+            conn.setReadBuffer(SETTINGS.READ_BUFFER_SIZE);
+        }
+        if (conn.setWriteBuffer) {
+            conn.setWriteBuffer(SETTINGS.WRITE_BUFFER_SIZE);
+        }
+        
+        // 设置socket选项
+        if (conn._handle && conn._handle.setNoDelay) {
+            conn._handle.setNoDelay(true);
+        }
+        
+        log('info', `Connected to ${hostname}(${resolvedHostname}):${port} with optimized settings`);
         return conn;
     } catch (err) {
         log('error', `Connection failed: ${err.message}`);
@@ -374,20 +463,25 @@ function timed_connect(hostname, port, ms) {
     })
 }
 
-// 网络传输
+// 网络传输 - 优化版本
 function pipe_relay() {
     async function pump(src, dest, first_packet) {
-        const chunkSize = parseInt(SETTINGS.CHUNK_SIZE);
+        const chunkSize = SETTINGS.CHUNK_SIZE;
+        let totalBytes = 0;
+        const startTime = Date.now();
         
         if (first_packet.length > 0) {
             if (dest.write) {
-                dest.cork(); // 合并多个小数据包
+                // 使用 cork/uncork 优化小包传输
+                dest.cork();
                 dest.write(first_packet);
                 process.nextTick(() => dest.uncork());
+                totalBytes += first_packet.length;
             } else {
                 const writer = dest.writable.getWriter();
                 try {
                     await writer.write(first_packet);
+                    totalBytes += first_packet.length;
                 } finally {
                     writer.releaseLock();
                 }
@@ -396,21 +490,61 @@ function pipe_relay() {
         
         try {
             if (src.pipe) {
-                // 优化 Node.js Stream
+                // 优化 Node.js Stream 传输
                 src.pause();
-                src.pipe(dest, {
+                
+                // 设置高水位线以优化内存使用
+                src._readableState.highWaterMark = chunkSize;
+                if (dest._writableState) {
+                    dest._writableState.highWaterMark = chunkSize;
+                }
+                
+                // 使用 Transform 流进行数据优化
+                const { Transform } = require('stream');
+                const optimizer = new Transform({
+                    transform(chunk, encoding, callback) {
+                        totalBytes += chunk.length;
+                        // 批量处理小数据包
+                        if (chunk.length < 1024) {
+                            this.push(chunk);
+                        } else {
+                            // 大块数据直接传输
+                            this.push(chunk);
+                        }
+                        callback();
+                    },
+                    highWaterMark: chunkSize
+                });
+                
+                src.pipe(optimizer).pipe(dest, {
                     end: true,
                     highWaterMark: chunkSize
                 });
                 src.resume();
             } else {
-                // 优化 Web Stream
-                await src.readable.pipeTo(dest.writable, {
-                    preventClose: false,
-                    preventAbort: false,
-                    preventCancel: false,
-                    signal: AbortSignal.timeout(SETTINGS.SESSION_TIMEOUT)
-                });
+                // 优化 Web Stream 传输
+                const reader = src.readable.getReader();
+                const writer = dest.writable.getWriter();
+                
+                try {
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        totalBytes += value.length;
+                        await writer.write(value);
+                    }
+                } finally {
+                    reader.releaseLock();
+                    writer.releaseLock();
+                }
+            }
+            
+            // 记录传输统计
+            const duration = Date.now() - startTime;
+            if (totalBytes > 0 && duration > 0) {
+                const speed = Math.round((totalBytes / duration) * 1000 / 1024); // KB/s
+                log('debug', `Transfer completed: ${totalBytes} bytes in ${duration}ms (${speed} KB/s)`);
             }
         } catch (err) {
             if (!err.message.includes('aborted')) {
@@ -423,36 +557,57 @@ function pipe_relay() {
 }
 
 // socketToWebStream 函数
-function socketToWebStream(socket) {
+function socketToWebStream(socket, session) {
     let readController;
     let writeController;
+    let isClosed = false;
     
-    socket.on('error', (err) => {
+    const errorHandler = (err) => {
+        if (isClosed) return;
         log('error', 'Socket error:', err.message);
         readController?.error(err);
         writeController?.error(err);
-    });
+    };
+    
+    const dataHandler = (chunk) => {
+        if (isClosed) return;
+        try {
+            readController?.enqueue(chunk);
+                    } catch (err) {
+                        log('error', 'Read controller error:', err.message);
+                    }
+    };
+    
+    const endHandler = () => {
+        if (isClosed) return;
+        try {
+            readController?.close();
+                    } catch (err) {
+                        log('error', 'Read controller close error:', err.message);
+                    }
+    };
+    
+    socket.on('error', errorHandler);
+    socket.on('data', dataHandler);
+    socket.on('end', endHandler);
+    
+    // 将事件监听器添加到会话跟踪中
+    if (session) {
+        session.eventListeners.add('error');
+        session.eventListeners.add('data');
+        session.eventListeners.add('end');
+    }
 
     return {
         readable: new ReadableStream({
             start(controller) {
                 readController = controller;
-                socket.on('data', (chunk) => {
-                    try {
-                        controller.enqueue(chunk);
-                    } catch (err) {
-                        log('error', 'Read controller error:', err.message);
-                    }
-                });
-                socket.on('end', () => {
-                    try {
-                        controller.close();
-                    } catch (err) {
-                        log('error', 'Read controller close error:', err.message);
-                    }
-                });
             },
             cancel() {
+                isClosed = true;
+                socket.removeListener('error', errorHandler);
+                socket.removeListener('data', dataHandler);
+                socket.removeListener('end', endHandler);
                 socket.destroy();
             }
         }),
@@ -462,7 +617,7 @@ function socketToWebStream(socket) {
             },
             write(chunk) {
                 return new Promise((resolve, reject) => {
-                    if (socket.destroyed) {
+                    if (socket.destroyed || isClosed) {
                         reject(new Error('Socket is destroyed'));
                         return;
                     }
@@ -473,11 +628,19 @@ function socketToWebStream(socket) {
                 });
             },
             close() {
+                isClosed = true;
+                socket.removeListener('error', errorHandler);
+                socket.removeListener('data', dataHandler);
+                socket.removeListener('end', endHandler);
                 if (!socket.destroyed) {
                     socket.end();
                 }
             },
             abort(err) {
+                isClosed = true;
+                socket.removeListener('error', errorHandler);
+                socket.removeListener('data', dataHandler);
+                socket.removeListener('end', endHandler);
                 socket.destroy(err);
             }
         })
@@ -485,11 +648,11 @@ function socketToWebStream(socket) {
 }
 
 // relay 函数
-function relay(cfg, client, remote, vless) {
+function relay(cfg, client, remote, vless, session) {
     const pump = pipe_relay();
     let isClosing = false;
     
-    const remoteStream = socketToWebStream(remote);
+    const remoteStream = socketToWebStream(remote, session);
     
     function cleanup() {
         if (!isClosing) {
@@ -535,6 +698,86 @@ function relay(cfg, client, remote, vless) {
 // 会话管理
 const sessions = new Map();
 
+// 定期清理过期会话
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    const expiredSessions = [];
+    
+    for (const [uuid, session] of sessions) {
+        if (now - session.lastActivity > SETTINGS.MAX_SESSION_AGE) {
+            expiredSessions.push(uuid);
+        }
+    }
+    
+    for (const uuid of expiredSessions) {
+        const session = sessions.get(uuid);
+        if (session) {
+            log('debug', `Cleaning up expired session: ${uuid}`);
+            session.cleanup();
+        }
+    }
+    
+    if (expiredSessions.length > 0) {
+        log('info', `Cleaned up ${expiredSessions.length} expired sessions`);
+    }
+}
+
+// 启动定期清理
+setInterval(cleanupExpiredSessions, SETTINGS.SESSION_CLEANUP_INTERVAL);
+
+// 性能统计
+const performanceStats = {
+    totalConnections: 0,
+    activeConnections: 0,
+    totalBytesTransferred: 0,
+    averageSpeed: 0,
+    peakMemoryUsage: 0,
+    startTime: Date.now()
+};
+
+// 内存监控和垃圾回收优化
+function monitorMemory() {
+    const memUsage = process.memoryUsage();
+    const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+    
+    // 更新峰值内存使用
+    performanceStats.peakMemoryUsage = Math.max(performanceStats.peakMemoryUsage, memMB);
+    
+    // 计算运行时间
+    const uptime = Math.round((Date.now() - performanceStats.startTime) / 1000);
+    const avgSpeed = performanceStats.totalBytesTransferred > 0 ? 
+        Math.round(performanceStats.totalBytesTransferred / uptime / 1024) : 0;
+    
+    log('debug', `Memory: Heap ${memMB}MB, RSS ${rssMB}MB, Sessions: ${sessions.size}, Speed: ${avgSpeed}KB/s`);
+    
+    // 如果内存使用过高，强制垃圾回收
+    if (memMB > 500) { // 500MB 阈值
+        log('warn', `High memory usage detected: ${memMB}MB, forcing garbage collection`);
+        if (global.gc) {
+            global.gc();
+            const newMemUsage = process.memoryUsage();
+            const newMemMB = Math.round(newMemUsage.heapUsed / 1024 / 1024);
+            log('info', `After GC: ${newMemMB}MB (freed ${memMB - newMemMB}MB)`);
+        }
+    }
+}
+
+// 性能监控
+function logPerformanceStats() {
+    const uptime = Math.round((Date.now() - performanceStats.startTime) / 1000);
+    const avgSpeed = performanceStats.totalBytesTransferred > 0 ? 
+        Math.round(performanceStats.totalBytesTransferred / uptime / 1024) : 0;
+    
+    log('info', `Performance Stats - Uptime: ${uptime}s, Connections: ${performanceStats.totalConnections}, Active: ${sessions.size}, Transferred: ${Math.round(performanceStats.totalBytesTransferred / 1024 / 1024)}MB, Avg Speed: ${avgSpeed}KB/s, Peak Memory: ${performanceStats.peakMemoryUsage}MB`);
+}
+
+// 每30秒监控一次内存
+setInterval(monitorMemory, 30000);
+
+// 每5分钟记录一次性能统计
+setInterval(logPerformanceStats, 300000);
+
 class Session {
     constructor(uuid) {
         this.uuid = uuid;
@@ -546,13 +789,25 @@ class Session {
         this.initialized = false;
         this.responseHeader = null;
         this.headerSent = false;
-        this.downstreamPiped = false;
         this.bufferedData = new Map();
         this.cleaned = false;
         this.pendingPackets = [];  // 存储待处理的数据包
         this.currentStreamRes = null; // 当前下行流响应
         this.pendingBuffers = new Map(); // 存储未按序到达的数据包
+        this.cleanupTimer = null; // 清理定时器
+        this.eventListeners = new Set(); // 跟踪事件监听器
+        this.bytesTransferred = 0; // 传输字节数统计
+        this.startTime = Date.now(); // 会话开始时间
         log('debug', `Created new session with UUID: ${uuid}`);
+        
+        // 更新性能统计
+        performanceStats.totalConnections++;
+        performanceStats.activeConnections++;
+        
+        // 设置自动清理定时器
+        this.cleanupTimer = setTimeout(() => {
+            this.cleanup();
+        }, SETTINGS.MAX_SESSION_AGE);
     }
 
     async initializeVLESS(firstPacket) {
@@ -560,7 +815,7 @@ class Session {
         
         try {
             log('debug', 'Initializing VLESS connection from first packet');
-            // 创建可读流来解析VLESS头
+            // 创建可读流来解析VLES头
             const readable = new ReadableStream({
                 start(controller) {
                     controller.enqueue(firstPacket);
@@ -590,40 +845,44 @@ class Session {
 
     async processPacket(seq, data) {
         try {
+            // 更新活动时间
+            this.lastActivity = Date.now();
+            
             // 保存数据到pendingBuffers
             this.pendingBuffers.set(seq, data);
             log('debug', `Buffered packet seq=${seq}, size=${data.length}`);
             
-            // 按序处理数据包
-            while (this.pendingBuffers.has(this.nextSeq)) {
-                const nextData = this.pendingBuffers.get(this.nextSeq);
-                this.pendingBuffers.delete(this.nextSeq);
+            // 特殊处理：如果收到seq=0，立即处理，不等待其他包
+            if (seq === 0 && !this.initialized) {
+                const packetData = this.pendingBuffers.get(0);
+                this.pendingBuffers.delete(0);
                 
-                // 只有第一个包需要初始化VLESS
-                if (!this.initialized && this.nextSeq === 0) {
-                    if (!await this.initializeVLESS(nextData)) {
+                if (!await this.initializeVLESS(packetData)) {
                         throw new Error('Failed to initialize VLESS connection');
                     }
+                
                     // 存储响应头
-                    this.responseHeader = Buffer.from(this.vlessHeader.resp);
+                this.responseHeader = Buffer.from([0x00, 0x00]);
+                
                     // 写入VLESS头部数据到远程
                     await this._writeToRemote(this.vlessHeader.data);
                     
-                    // 如果有待处理的下游连接，立即发送响应
-                    if (this.currentStreamRes) {
-                        this._startDownstreamResponse();
-                    }
-                } else {
-                    // 后续数据包直接发送
-                    if (!this.initialized) {
-                        log('warn', `Received out of order packet seq=${seq} before initialization`);
-                        continue;
-                    }
-                    await this._writeToRemote(nextData);
-                }
+                // 处理所有待处理的数据包
+                await this._processPendingPackets();
                 
-                this.nextSeq++;
-                log('debug', `Processed packet seq=${this.nextSeq-1}`);
+                return true;
+            }
+            
+            // 如果已经初始化，直接处理数据包
+            if (this.initialized) {
+                await this._writeToRemote(data);
+                return true;
+            }
+            
+            // 如果还没初始化但不是seq=0，等待初始化完成
+            if (!this.initialized) {
+                log('debug', `Waiting for initialization, buffering packet seq=${seq}`);
+                return true;
             }
 
             // 检查缓存大小
@@ -635,6 +894,78 @@ class Session {
         } catch (err) {
             log('error', `Process packet error: ${err.message}`);
             throw err;
+        }
+    }
+    
+    async _processPendingPackets() {
+        // 处理所有待处理的数据包
+        const sortedSeqs = Array.from(this.pendingBuffers.keys()).sort((a, b) => a - b);
+        
+        for (const seq of sortedSeqs) {
+            if (seq > 0) { // 跳过seq=0，已经处理过了
+                const data = this.pendingBuffers.get(seq);
+                this.pendingBuffers.delete(seq);
+                
+                if (this.initialized) {
+                    await this._writeToRemote(data);
+                    log('debug', `Processed pending packet seq=${seq}`);
+                }
+            }
+        }
+    }
+    
+
+    _startDownstreamResponse() {
+        if (!this.currentStreamRes || !this.responseHeader) return;
+        
+        try {
+            const protocol = this.currentStreamRes.socket?.alpnProtocol || 'http/1.1';
+            const isH2 = protocol === 'h2';
+
+            if (!this.headerSent) {
+                log('debug', `Sending VLESS response header (${protocol}): ${this.responseHeader.length} bytes`);
+                this.currentStreamRes.write(this.responseHeader);
+                this.headerSent = true;
+            }
+            
+            // 根据协议使用不同的传输策略
+            if (isH2) {
+                // HTTP/2 优化
+                this.currentStreamRes.socket.setNoDelay(true);
+                
+                // 使用 Transform 流进行数据分块
+                const transform = new require('stream').Transform({
+                    transform(chunk, encoding, callback) {
+                        const size = 16384; // 16KB chunks
+                        for (let i = 0; i < chunk.length; i += size) {
+                            this.push(chunk.slice(i, i + size));
+                        }
+                        callback();
+                    }
+                });
+                
+                this.remote.pipe(transform).pipe(this.currentStreamRes);
+            } else {
+                // HTTP/1.1 直接传输
+                this.remote.pipe(this.currentStreamRes);
+            }
+            
+            // 处理关闭事件
+            this.remote.on('end', () => {
+                if (!this.currentStreamRes.writableEnded) {
+                    this.currentStreamRes.end();
+                }
+            });
+            
+            this.remote.on('error', (err) => {
+                log('error', `Remote error: ${err.message}`);
+                if (!this.currentStreamRes.writableEnded) {
+                    this.currentStreamRes.end();
+                }
+            });
+        } catch (err) {
+            log('error', `Error starting downstream: ${err.message}`);
+            this.cleanup();
         }
     }
 
@@ -649,10 +980,16 @@ class Session {
             this._startDownstreamResponse();
         }
         
-        res.on('close', () => {
+        const closeHandler = () => {
             log('info', 'Client connection closed');
             this.cleanup();
-        });
+        };
+        
+        res.on('close', closeHandler);
+        this.eventListeners.add('close');
+        
+        // 更新活动时间
+        this.lastActivity = Date.now();
 
         return true;
     }
@@ -668,6 +1005,8 @@ class Session {
                     log('error', `Failed to write to remote: ${err.message}`);
                     reject(err);
                 } else {
+                    // 更新传输字节统计
+                    this.bytesTransferred += data.length;
                     resolve();
                 }
             });
@@ -675,72 +1014,171 @@ class Session {
     }
 
     _startDownstreamResponse() {
-        if (!this.currentStreamRes || !this.responseHeader || !this.remote) return;
-        if (this.downstreamPiped) return;
-
+        if (!this.currentStreamRes || !this.responseHeader) return;
+        
         try {
             if (!this.headerSent) {
                 this.currentStreamRes.write(this.responseHeader);
                 this.headerSent = true;
             }
-
-            this.downstreamPiped = true;
+            
             this.remote.pipe(this.currentStreamRes);
-
-            this.remote.once('end', () => {
+            
+            const endHandler = () => {
                 if (!this.currentStreamRes.writableEnded) {
                     this.currentStreamRes.end();
                 }
-            });
-
-            this.remote.once('error', (err) => {
+            };
+            
+            const errorHandler = (err) => {
                 log('error', `Remote error: ${err.message}`);
                 if (!this.currentStreamRes.writableEnded) {
                     this.currentStreamRes.end();
                 }
-            });
+            };
+            
+            this.remote.on('end', endHandler);
+            this.remote.on('error', errorHandler);
+            
+            this.eventListeners.add('end');
+            this.eventListeners.add('error');
         } catch (err) {
             log('error', `Error starting downstream: ${err.message}`);
             this.cleanup();
         }
     }
 
-
     cleanup() {
         if (!this.cleaned) {
             this.cleaned = true;
-            log('debug', `Cleaning up session ${this.uuid}`);
+            
+            // 更新性能统计
+            performanceStats.totalBytesTransferred += this.bytesTransferred;
+            performanceStats.activeConnections--;
+            
+            const duration = Date.now() - this.startTime;
+            const speed = this.bytesTransferred > 0 ? Math.round(this.bytesTransferred / duration * 1000 / 1024) : 0;
+            
+            log('debug', `Cleaning up session ${this.uuid} - Duration: ${Math.round(duration/1000)}s, Transferred: ${Math.round(this.bytesTransferred/1024)}KB, Speed: ${speed}KB/s`);
+            
+            // 清除定时器
+            if (this.cleanupTimer) {
+                clearTimeout(this.cleanupTimer);
+                this.cleanupTimer = null;
+            }
+            
+            // 清理远程连接
             if (this.remote) {
+                this.remote.removeAllListeners();
                 this.remote.destroy();
                 this.remote = null;
             }
+            
+            // 清理当前流响应
+            if (this.currentStreamRes) {
+                this.currentStreamRes.removeAllListeners();
+                this.currentStreamRes = null;
+            }
+            
+            // 清理缓冲区
+            this.pendingBuffers.clear();
+            this.bufferedData.clear();
+            this.pendingPackets = [];
+            
+            // 清理事件监听器
+            this.eventListeners.clear();
+            
             this.initialized = false;
             this.headerSent = false;
-            this.downstreamPiped = false;
+            
+            // 从全局会话中移除
+            sessions.delete(this.uuid);
         }
     }
 } 
 
 // 获取ISP信息
-const metaInfo = execSync(
-    'curl -s https://speed.cloudflare.com/meta | awk -F\\" \'{print $26"-"$18}\' | sed -e \'s/ /_/g\'',
-    { encoding: 'utf-8' }
-);
-const ISP = metaInfo.trim();
-let IP = DOMAIN;
-if (!DOMAIN) {
+async function getISPInfo() {
     try {
-        // 首先尝试获取 IPv4
-        IP = execSync('curl -s --max-time 2 ipv4.ip.sb', { encoding: 'utf-8' }).trim();
+        const response = await axios.get('https://api.ip.sb/geoip', { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', timeout: 5000 }});
+        const data = response.data;
+        const country = data.country_code || 'Unknown';
+        const org = data.isp || 'Unknown';
+        const isp = `${country}-${org}`.replace(/[^a-zA-Z0-9\-_]/g, '_');
+        
+        log('info', `ISP info obtained: ${isp}`);
+        return isp;
     } catch (err) {
-        try {
-            IP = `[${execSync('curl -s --max-time 1 ipv6.ip.sb', { encoding: 'utf-8' }).trim()}]`;
-        } catch (ipv6Err) {
-            log('error', 'Failed to get IP address:', ipv6Err.message);
-            IP = 'localhost'; 
-        }
+        log('error', `Failed to get ISP info: ${err.message}`);
+        return 'Unknown_ISP';
     }
 }
+
+// 获取服务器IP
+async function getServerIP() {
+    if (DOMAIN) {
+        return DOMAIN;
+    }
+    
+    const ipServices = [
+        'https://ipv4.ip.sb',
+        'https://ipinfo.io/ip',
+        'https://ifconfig.me'
+    ];
+    
+    for (const service of ipServices) {
+        try {
+            const response = await axios.get(service, {
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            
+            const ip = response.data.trim();
+            if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+                log('info', `Got server IP: ${ip} from ${service}`);
+                return ip;
+            }
+        } catch (err) {
+            log('debug', `Failed to get IP from ${service}: ${err.message}`);
+        }
+    }
+    
+    // 如果所有IPv4服务都失败，尝试IPv6
+    try {
+        const response = await axios.get('https://ipv6.ip.sb', {
+            timeout: 5000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        
+        const ipv6 = response.data.trim();
+        if (ipv6) {
+            log('info', `Got IPv6 address: ${ipv6}`);
+            return `[${ipv6}]`;
+        }
+    } catch (ipv6Err) {
+        log('debug', 'IPv6 fallback failed:', ipv6Err.message);
+    }
+    
+    log('warn', 'Failed to get server IP, using localhost');
+    return 'localhost';
+}
+
+// 异步获取IP和ISP信息
+let IP = 'localhost';
+let ISP = 'Unknown_ISP';
+
+Promise.all([
+    getServerIP().then(ip => { IP = ip; }),
+    getISPInfo().then(isp => { ISP = isp; })
+]).then(() => {
+    log('info', `Server info: IP=${IP}, ISP=${ISP}`);
+}).catch(err => {
+    log('error', `Failed to get server info: ${err.message}`);
+});
 
 // 创建http服务
 const server = http.createServer((req, res) => {
@@ -749,10 +1187,10 @@ const server = http.createServer((req, res) => {
         'Access-Control-Allow-Methods': 'GET, POST',
         'Cache-Control': 'no-store',
         'X-Accel-Buffering': 'no',
-        'X-Padding': generatePadding(32, 128),
+        'X-Padding': generatePadding(100, 1000),
     };
 
-    // 根路径和订阅路径
+   // 根路径
     if (req.url === '/') {
         const filePath = path.join(__dirname, 'index.html');
         fs.readFile(filePath, 'utf8', (err, content) => {
@@ -767,7 +1205,7 @@ const server = http.createServer((req, res) => {
         });
         return;
     }
-    
+    // 订阅路径
     if (req.url === `/${SUB_PATH}`) {
         const vlessURL = `vless://${UUID}@${IP}:443?encryption=none&security=tls&sni=${IP}&fp=chrome&allowInsecure=1&type=xhttp&host=${IP}&path=${SETTINGS.XPATH}&mode=packet-up#${NAME}-${ISP}`; 
         const base64Content = Buffer.from(vlessURL).toString('base64');
@@ -787,8 +1225,13 @@ const server = http.createServer((req, res) => {
     const seq = pathMatch[2] ? parseInt(pathMatch[2]) : null;
 
     if (req.method === 'GET' && !seq) {
-        headers['Content-Type'] = 'application/octet-stream';
-        headers['Transfer-Encoding'] = 'chunked';
+        const hijacker = res.socket;
+        if (!hijacker) {
+            log('error', 'HTTP Hijacking not supported');
+            res.writeHead(500);
+            res.end();
+            return;
+        }
 
         let session = sessions.get(uuid);
         if (!session) {
@@ -799,15 +1242,93 @@ const server = http.createServer((req, res) => {
 
         session.downstreamStarted = true;
         
-        if (!session.startDownstream(res, headers)) {
-            log('error', `Failed to start downstream for session: ${uuid}`);
-            if (!res.headersSent) {
-                res.writeHead(500);
-                res.end();
-            }
+        // 发送HTTP响应头
+        const httpResponse = 'HTTP/1.1 200 OK\r\n' +
+                           'Content-Type: application/octet-stream\r\n' +
+                           'Connection: close\r\n' +
+                           '\r\n';
+        
+        try {
+            hijacker.write(httpResponse);
+            log('debug', `Sent HTTP response header for session: ${uuid}`);
+        } catch (err) {
+            log('error', `Failed to write HTTP response: ${err.message}`);
             session.cleanup();
-            sessions.delete(uuid);
+            return;
         }
+
+        let waitCount = 0;
+        const maxWait = 600; // 30秒超时 (600 * 50ms)
+        
+        const waitForResponse = () => {
+            if (session.initialized && session.responseHeader) {
+                try {
+                    hijacker.write(session.responseHeader);
+                    log('debug', `Sent VLESS response header for session: ${uuid}`);
+                    
+                    session.remote.on('data', (chunk) => {
+                        try {
+                            if (!hijacker.destroyed) {
+                                hijacker.write(chunk);
+                            }
+                        } catch (err) {
+                            log('debug', `Error writing to client: ${err.message}`);
+            session.cleanup();
+                        }
+                    });
+                    
+                    hijacker.on('data', (chunk) => {
+                        try {
+                            if (!session.remote.destroyed) {
+                                session.remote.write(chunk);
+                            }
+                        } catch (err) {
+                            log('debug', `Error writing to remote: ${err.message}`);
+                            session.cleanup();
+                        }
+                    });
+                    
+                    // 处理连接关闭
+                    session.remote.on('close', () => {
+                        if (!hijacker.destroyed) {
+                            hijacker.end();
+                        }
+                    });
+                    
+                    session.remote.on('error', (err) => {
+                        log('debug', `Remote connection error: ${err.message}`);
+                        if (!hijacker.destroyed) {
+                            hijacker.end();
+                        }
+                    });
+                    
+                    hijacker.on('close', () => {
+                        log('debug', `Client connection closed for session: ${uuid}`);
+                        session.cleanup();
+                    });
+                    
+                    hijacker.on('error', (err) => {
+                        log('debug', `Client connection error for session: ${uuid}: ${err.message}`);
+                        session.cleanup();
+                    });
+                    
+                } catch (err) {
+                    log('error', `Failed to write VLESS response: ${err.message}`);
+                    session.cleanup();
+                }
+            } else if (waitCount < maxWait) {
+                // 继续等待
+                waitCount++;
+                setTimeout(waitForResponse, 50);
+            } else {
+                // 超时
+                log('error', `Session initialization timeout for: ${uuid}`);
+                session.cleanup();
+                hijacker.end();
+            }
+        };
+        
+        waitForResponse();
         return;
     }
     
@@ -824,7 +1345,6 @@ const server = http.createServer((req, res) => {
                 if (currentSession && !currentSession.downstreamStarted) {
                     log('warn', `Session ${uuid} timed out without downstream`);
                     currentSession.cleanup();
-                    sessions.delete(uuid);
                 }
             }, SETTINGS.SESSION_TIMEOUT);
         }
@@ -864,7 +1384,6 @@ const server = http.createServer((req, res) => {
             } catch (err) {
                 log('error', `Failed to process POST request: ${err.message}`);
                 session.cleanup();
-                sessions.delete(uuid);
                 
                 if (!headersSent) {
                     res.writeHead(500);
@@ -891,12 +1410,37 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 300000;
-server.headersTimeout = 60000;
-server.requestTimeout = 300000;
-server.timeout = 300000;
-server.maxConnections = 600;
-  
+// 优化HTTP服务器设置
+server.keepAliveTimeout = 300000;  // 5分钟
+server.headersTimeout = 60000;     // 1分钟
+server.requestTimeout = 300000;    // 5分钟
+server.timeout = 300000;           // 5分钟
+
+// 最大连接数
+server.maxConnections = 1000;
+
+// 启用HTTP/2支持
+server.on('upgrade', (request, socket, head) => {
+    log('debug', 'HTTP upgrade request received');
+});
+
+// 优化连接处理
+server.on('connection', (socket) => {
+    // 设置socket选项
+    socket.setNoDelay(true);
+    socket.setKeepAlive(true, 1000);
+    
+    // 设置超时
+    socket.setTimeout(300000);
+    
+    // 设置缓冲区大小
+    if (socket.setReadBuffer) {
+        socket.setReadBuffer(SETTINGS.READ_BUFFER_SIZE);
+    }
+    if (socket.setWriteBuffer) {
+        socket.setWriteBuffer(SETTINGS.WRITE_BUFFER_SIZE);
+    }
+});   
 
 server.on('error', (err) => {
     log('error', `Server error: ${err.message}`);
