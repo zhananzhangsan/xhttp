@@ -23,12 +23,12 @@ const PORT = process.env.PORT || 3000;                     // http服务
 const SETTINGS = {
     UUID: UUID,
     LOG_LEVEL: 'none',
-    BUFFER_SIZE: '32 * 1024',
+    BUFFER_SIZE: '8192',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 12,
-    MAX_POST_SIZE: 384 * 1024,
-    SESSION_TIMEOUT: 20000,
-    CHUNK_SIZE: 32 * 1024,
+    MAX_BUFFERED_POSTS: 30,
+    MAX_POST_SIZE: 1000000,
+    SESSION_TIMEOUT: 30000,
+    CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
 }
@@ -891,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 25000;
-server.headersTimeout = 30000;
-server.requestTimeout = 60000;
-server.timeout = 60000;
-server.maxConnections = 60;
+server.keepAliveTimeout = 300000;
+server.headersTimeout = 60000;
+server.requestTimeout = 300000;
+server.timeout = 300000;
+server.maxConnections = 600;
   
 
 server.on('error', (err) => {
