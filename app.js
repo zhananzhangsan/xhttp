@@ -25,9 +25,9 @@ const SETTINGS = {
     LOG_LEVEL: 'none',
     BUFFER_SIZE: '65536',
     XPATH: `%2F${XPATH}`,
-    MAX_BUFFERED_POSTS: 20,
+    MAX_BUFFERED_POSTS: 30,
     MAX_POST_SIZE: 1000000,
-    SESSION_TIMEOUT: 120000,
+    SESSION_TIMEOUT: 60000,
     CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
@@ -345,7 +345,7 @@ async function connect_remote(hostname, port) {
         
         // 优化 TCP 连接
         conn.setNoDelay(true);  // 启用 TCP_NODELAY
-        conn.setKeepAlive(true, 30000);  // 启用 TCP keepalive
+        conn.setKeepAlive(true, 10000);  // 启用 TCP keepalive
         
         
         log('info', `Connected to ${hostname}:${port}`);
@@ -891,11 +891,11 @@ function generatePadding(min, max) {
     return Buffer.from(Array(length).fill('X').join('')).toString('base64');
 }
 
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 70000;
-server.requestTimeout = 0;
-server.timeout = 0;
-server.maxConnections = 500;
+server.keepAliveTimeout = 30000;
+server.headersTimeout = 35000;
+server.requestTimeout = 30000;
+server.timeout = 45000;
+server.maxConnections = 150;
   
 
 server.on('error', (err) => {
