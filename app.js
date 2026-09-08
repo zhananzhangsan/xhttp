@@ -28,9 +28,9 @@ const SETTINGS = {
     XPATH: `%2F${XPATH}`,
     MAX_BUFFERED_POSTS: 30,
     MAX_POST_SIZE: 1000000,
-    SESSION_TIMEOUT: 45000,
+    SESSION_TIMEOUT: 30000,
     // 乱序包最大等待时间（毫秒），超时则清理 Session
-    SEQUENCE_WAIT_TIMEOUT: 12000,
+    SEQUENCE_WAIT_TIMEOUT: 8000,
     CHUNK_SIZE: 64 * 1024,
     TCP_NODELAY: true,
     TCP_KEEPALIVE: true,
@@ -1100,7 +1100,7 @@ function generatePadding(min, max) {
 server.keepAliveTimeout = 30000;
 server.headersTimeout = 60000;
 server.requestTimeout = 0;          // 0 = 不限制，由应用层控制
-server.timeout = 0;
+server.timeout = 120000;
 server.maxConnections = 100;
   
 
