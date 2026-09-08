@@ -1931,27 +1931,17 @@ async function addAccessTask() {
  * IP / ISP
  * ======================================================= */
 
-async function getPublicIP() {
-    if (DOMAIN) {
-        return DOMAIN;
-    }
-
-    /*
-     * 使用 https 请求，避免依赖 shell/curl。
-     */
+async function getIP() {
     try {
-        const response =
-            await axios.get(
-                'https://api.ipify.org',
-                {
-                    timeout: 3000,
-                    responseType: 'text'
-                }
-            );
+        const response = await axios.get(
+            'https://api4.ipify.org',
+            {
+                timeout: 3000,
+                responseType: 'text'
+            }
+        );
 
-        const ip =
-            String(response.data)
-                .trim();
+        const ip = response.data.trim();
 
         if (ip) {
             return ip;
@@ -1964,11 +1954,18 @@ async function getPublicIP() {
     }
 
     try {
-        const response =
-            await axios.get(
-                'https://api6.ipify.org',
-                {
- return `[${ip}]`;
+        const response = await axios.get(
+            'https://api6.ipify.org',
+            {
+                timeout: 3000,
+                responseType: 'text'
+            }
+        );
+
+        const ip = response.data.trim();
+
+        if (ip) {
+            return `[${ip}]`;
         }
     } catch (err) {
         log(
