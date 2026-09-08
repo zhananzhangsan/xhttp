@@ -1098,9 +1098,9 @@ function generatePadding(min, max) {
 
 // 放宽 requestTimeout，避免正常慢 POST 被误杀；靠 body 大小限制 + Session 超时防护
 server.keepAliveTimeout = 30000;
-server.headersTimeout = 60000;
-server.requestTimeout = 0;          // 0 = 不限制，由应用层控制
-server.timeout = 120000;
+server.headersTimeout = 35000;
+server.requestTimeout = 30000;          // 0 = 不限制，由应用层控制
+server.timeout = 45000;
 server.maxConnections = 100;
   
 
