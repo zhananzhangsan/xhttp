@@ -4,14 +4,12 @@ const os = require('os');
 const fs = require('fs');
 const net = require('net');
 const http = require('http');
-const https = require('https');
 const axios = require('axios');
 const path = require('path');
-const { Buffer } = require('buffer');
-const { exec, spawn } = require('child_process');
+const { spawn } = require('child_process');
 
 /* =========================================================
- * 环境变量
+ * Environment
  * ======================================================= */
 
 const UUID =
@@ -28,13 +26,17 @@ const NEZHA_KEY =
     process.env.NEZHA_KEY || '';
 
 const AUTO_ACCESS =
-    String(process.env.AUTO_ACCESS || 'false').toLowerCase() === 'true';
+    String(
+        process.env.AUTO_ACCESS || 'false'
+    ).toLowerCase() === 'true';
 
 const XPATH =
-    process.env.XPATH || UUID.slice(0, 8);
+    process.env.XPATH ||
+    UUID.slice(0, 8);
 
 const SUB_PATH =
-    process.env.SUB_PATH || UUID;
+    process.env.SUB_PATH ||
+    UUID;
 
 const DOMAIN =
     process.env.DOMAIN || '';
@@ -42,16 +44,12 @@ const DOMAIN =
 const NAME =
     process.env.NAME || '';
 
-/*
- * Koyeb 会提供 PORT。
- * 本地运行时默认 3000。
- */
 const PORT =
     Number(process.env.PORT || 3000);
 
 
 /* =========================================================
- * 核心配置
+ * Settings
  * ======================================================= */
 
 const SETTINGS = {
@@ -61,16 +59,24 @@ const SETTINGS = {
         process.env.LOG_LEVEL || 'none',
 
     BUFFER_SIZE:
-        Number(process.env.BUFFER_SIZE || 65536),
+        Number(
+            process.env.BUFFER_SIZE || 65536
+        ),
 
     CHUNK_SIZE:
-        Number(process.env.CHUNK_SIZE || 65536),
+        Number(
+            process.env.CHUNK_SIZE || 65536
+        ),
 
     SESSION_TIMEOUT:
-        Number(process.env.SESSION_TIMEOUT || 45000),
+        Number(
+            process.env.SESSION_TIMEOUT || 45000
+        ),
 
     CONNECT_TIMEOUT:
-        Number(process.env.CONNECT_TIMEOUT || 8000),
+        Number(
+            process.env.CONNECT_TIMEOUT || 8000
+        ),
 
     TCP_NODELAY:
         true,
@@ -82,22 +88,30 @@ const SETTINGS = {
         10000,
 
     MAX_SESSIONS:
-        Number(process.env.MAX_SESSIONS || 50),
+        Number(
+            process.env.MAX_SESSIONS || 50
+        ),
 
     MAX_HEADER_SIZE:
-        Number(process.env.MAX_HEADER_SIZE || 65536),
+        Number(
+            process.env.MAX_HEADER_SIZE || 65536
+        ),
 
     MAX_POST_SIZE:
-        Number(process.env.MAX_POST_SIZE || 0),
+        Number(
+            process.env.MAX_POST_SIZE || 0
+        )
 };
 
 
 /* =========================================================
- * 日志
+ * Logging
  * ======================================================= */
 
 function log(type, ...args) {
-    if (SETTINGS.LOG_LEVEL === 'none') {
+    if (
+        SETTINGS.LOG_LEVEL === 'none'
+    ) {
         return;
     }
 
@@ -122,7 +136,9 @@ function log(type, ...args) {
     const messageLevel =
         levels[type] ?? 0;
 
-    if (messageLevel < configLevel) {
+    if (
+        messageLevel < configLevel
+    ) {
         return;
     }
 
@@ -130,7 +146,8 @@ function log(type, ...args) {
         new Date().toISOString();
 
     const color =
-        colors[type] || colors.reset;
+        colors[type] ||
+        colors.reset;
 
     console.log(
         `${color}[${time}] [${type}]`,
@@ -150,16 +167,28 @@ function parseUUID(uuid) {
             .replace(/-/g, '')
             .toLowerCase();
 
-    if (!/^[0-9a-f]{32}$/.test(clean)) {
-        throw new Error('invalid UUID format');
+    if (
+        !/^[0-9a-f]{32}$/.test(clean)
+    ) {
+        throw new Error(
+            'invalid UUID format'
+        );
     }
 
-    const result = new Uint8Array(16);
+    const result =
+        Buffer.alloc(16);
 
-    for (let i = 0; i < 16; i++) {
+    for (
+        let i = 0;
+        i < 16;
+        i++
+    ) {
         result[i] =
             parseInt(
-                clean.slice(i * 2, i * 2 + 2),
+                clean.slice(
+                    i * 2,
+                    i * 2 + 2
+                ),
                 16
             );
     }
@@ -169,21 +198,21 @@ function parseUUID(uuid) {
 
 
 function validateUUID(left, right) {
-    if (!left || !right || left.length !== 16 || right.length !== 16) {
+    if (
+        !left ||
+        !right ||
+        left.length !== 16 ||
+        right.length !== 16
+    ) {
         return false;
     }
 
-    for (let i = 0; i < 16; i++) {
-        if (left[i] !== right[i]) {
-            return false;
-        }
-    }
-
-    return true;
+    return left.equals(right);
 }
 
 
-const CONFIG_UUID_BYTES = parseUUID(UUID);
+const CONFIG_UUID_BYTES =
+    parseUUID(UUID);
 
 
 /* =========================================================
@@ -194,7 +223,8 @@ function generatePadding(min, max) {
     const length =
         min +
         Math.floor(
-            Math.random() * (max - min + 1)
+            Math.random() *
+            (max - min + 1)
         );
 
     return Buffer
@@ -204,110 +234,148 @@ function generatePadding(min, max) {
 
 
 /* =========================================================
- * HTTP Headers
- *
- * 注意：
- * 不手工设置 Content-Length。
- *
- * HTTP/1.1 下 Node 会自动使用 chunked。
- * 如果未来直接改成 HTTP/2，Transfer-Encoding
- * 不能使用，所以这里干脆不显式设置。
+ * Headers
  * ======================================================= */
 
 function createStreamHeaders() {
     return {
-        'Content-Type': 'application/octet-stream',
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-        'Pragma': 'no-cache',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': '*',
-        'X-Accel-Buffering': 'no',
-        'X-Padding': generatePadding(32, 128)
+        'Content-Type':
+            'application/octet-stream',
+
+        'Cache-Control':
+            'no-store, no-cache, must-revalidate',
+
+        'Pragma':
+            'no-cache',
+
+        'Access-Control-Allow-Origin':
+            '*',
+
+        'Access-Control-Allow-Methods':
+            'GET, POST, OPTIONS',
+
+        'Access-Control-Allow-Headers':
+            '*',
+
+        'X-Accel-Buffering':
+            'no',
+
+        'X-Padding':
+            generatePadding(32, 128)
     };
 }
 
 
 function createSubscriptionHeaders() {
     return {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Access-Control-Allow-Headers': '*'
+        'Content-Type':
+            'text/plain; charset=utf-8',
+
+        'Cache-Control':
+            'no-store',
+
+        'Access-Control-Allow-Origin':
+            '*',
+
+        'Access-Control-Allow-Headers':
+            '*'
     };
 }
 
 
 /* =========================================================
- * VLESS Header Parser
+ * VLESS Parser
  *
- * stream-one 的关键：
+ * stream-one:
  *
- * POST body 不再按 seq 分包。
+ * One POST request carries:
  *
- * Node req 本身就是一个连续的 Readable。
+ *   VLESS header
+ *   +
+ *   TCP data
+ *   +
+ *   TCP data
+ *   +
+ *   ...
  *
- * 我们只需要：
- *
- *   1. 从 req 中逐渐读取 VLESS header
- *   2. header 完整后连接 remote
- *   3. header 后面的数据立即写入 remote
- *   4. 后续 chunk 全部直接 pipe 到 remote
- *
- * 不需要：
- *
- *   seq
- *   nextSeq
- *   pendingBuffers
- *   reorder
- *   sequence timeout
+ * There is no packet-up sequence number,
+ * reordering or pending packet buffer.
  * ======================================================= */
 
 class VLESSParser {
     constructor(uuidBytes) {
-        this.uuidBytes = uuidBytes;
-        this.buffer = Buffer.alloc(0);
-        this.headerParsed = false;
-        this.header = null;
+        this.uuidBytes =
+            uuidBytes;
+
+        this.buffer =
+            Buffer.alloc(0);
+
+        this.headerParsed =
+            false;
+
+        this.header =
+            null;
     }
 
+
     append(chunk) {
-        if (!chunk || chunk.length === 0) {
+        if (
+            !chunk ||
+            chunk.length === 0
+        ) {
             return;
         }
 
-        this.buffer =
+        if (
             this.buffer.length === 0
-                ? Buffer.from(chunk)
-                : Buffer.concat([
+        ) {
+            this.buffer =
+                Buffer.from(chunk);
+        } else {
+            this.buffer =
+                Buffer.concat([
                     this.buffer,
                     chunk
                 ]);
+        }
 
-        if (this.buffer.length > SETTINGS.MAX_HEADER_SIZE) {
-            throw new Error('VLESS header too large');
+        if (
+            this.buffer.length >
+            SETTINGS.MAX_HEADER_SIZE
+        ) {
+            throw new Error(
+                'VLESS header too large'
+            );
         }
     }
 
+
     parse() {
-        if (this.headerParsed) {
+        if (
+            this.headerParsed
+        ) {
             return this.header;
         }
 
-        const buf = this.buffer;
+        const buf =
+            this.buffer;
 
         /*
-         * 最小：
+         * Minimum:
          *
-         * version      1
-         * UUID        16
-         * addons len   1
-         * command      1
-         * port         2
-         * address type 1
+         * version  1
+         * UUID    16
+         * addon    1
+         * command  1
+         * port     2
+         * type     1
          *
          * = 22 bytes
          */
 
-        if (buf.length < 22) {
+        if (
+            buf.length < 22
+        ) {
             return null;
         }
 
@@ -317,8 +385,15 @@ class VLESSParser {
         const uuid =
             buf.subarray(1, 17);
 
-        if (!validateUUID(uuid, this.uuidBytes)) {
-            throw new Error('invalid UUID');
+        if (
+            !validateUUID(
+                uuid,
+                this.uuidBytes
+            )
+        ) {
+            throw new Error(
+                'invalid UUID'
+            );
         }
 
         const addonLength =
@@ -327,7 +402,10 @@ class VLESSParser {
         const commandOffset =
             18 + addonLength;
 
-        if (buf.length < commandOffset + 1) {
+        if (
+            buf.length <
+            commandOffset + 1
+        ) {
             return null;
         }
 
@@ -335,9 +413,11 @@ class VLESSParser {
             buf[commandOffset];
 
         /*
-         * VLESS TCP
+         * TCP command.
          */
-        if (command !== 1) {
+        if (
+            command !== 1
+        ) {
             throw new Error(
                 `unsupported VLESS command: ${command}`
             );
@@ -346,12 +426,17 @@ class VLESSParser {
         const portOffset =
             commandOffset + 1;
 
-        if (buf.length < portOffset + 3) {
+        if (
+            buf.length <
+            portOffset + 3
+        ) {
             return null;
         }
 
         const port =
-            buf.readUInt16BE(portOffset);
+            buf.readUInt16BE(
+                portOffset
+            );
 
         const addressType =
             buf[portOffset + 2];
@@ -359,25 +444,34 @@ class VLESSParser {
         const addressOffset =
             portOffset + 3;
 
-        let hostname = '';
-        let headerLength = 0;
+        let hostname =
+            '';
+
+        let headerLength =
+            0;
 
         /*
          * IPv4
          */
-        if (addressType === 1) {
-            if (buf.length < addressOffset + 4) {
+        if (
+            addressType === 1
+        ) {
+            if (
+                buf.length <
+                addressOffset + 4
+            ) {
                 return null;
             }
 
-            hostname = Array
-                .from(
-                    buf.subarray(
-                        addressOffset,
-                        addressOffset + 4
+            hostname =
+                Array
+                    .from(
+                        buf.subarray(
+                            addressOffset,
+                            addressOffset + 4
+                        )
                     )
-                )
-                .join('.');
+                    .join('.');
 
             headerLength =
                 addressOffset + 4;
@@ -386,15 +480,22 @@ class VLESSParser {
         /*
          * Domain
          */
-        else if (addressType === 2) {
-            if (buf.length < addressOffset + 1) {
+        else if (
+            addressType === 2
+        ) {
+            if (
+                buf.length <
+                addressOffset + 1
+            ) {
                 return null;
             }
 
             const domainLength =
                 buf[addressOffset];
 
-            if (domainLength <= 0) {
+            if (
+                domainLength <= 0
+            ) {
                 throw new Error(
                     'invalid domain length'
                 );
@@ -413,7 +514,9 @@ class VLESSParser {
                 buf
                     .subarray(
                         addressOffset + 1,
-                        addressOffset + 1 + domainLength
+                        addressOffset +
+                        1 +
+                        domainLength
                     )
                     .toString('utf8');
 
@@ -426,14 +529,23 @@ class VLESSParser {
         /*
          * IPv6
          */
-        else if (addressType === 3) {
-            if (buf.length < addressOffset + 16) {
+        else if (
+            addressType === 3
+        ) {
+            if (
+                buf.length <
+                addressOffset + 16
+            ) {
                 return null;
             }
 
             const parts = [];
 
-            for (let i = 0; i < 16; i += 2) {
+            for (
+                let i = 0;
+                i < 16;
+                i += 2
+            ) {
                 parts.push(
                     buf
                         .readUInt16BE(
@@ -456,33 +568,43 @@ class VLESSParser {
             );
         }
 
-        if (!hostname) {
+        if (
+            !hostname
+        ) {
             throw new Error(
                 'empty VLESS hostname'
             );
         }
 
         const remaining =
-            buf.subarray(headerLength);
+            buf.subarray(
+                headerLength
+            );
 
         this.header = {
             version,
+
             hostname,
+
             port,
-            data: Buffer.from(remaining),
-            resp: Buffer.from([
-                version,
-                0
-            ])
+
+            data:
+                Buffer.from(
+                    remaining
+                ),
+
+            resp:
+                Buffer.from([
+                    version,
+                    0
+                ])
         };
 
-        /*
-         * 清掉 header。
-         *
-         * 后续数据不再经过 parser。
-         */
-        this.buffer = Buffer.alloc(0);
-        this.headerParsed = true;
+        this.buffer =
+            Buffer.alloc(0);
+
+        this.headerParsed =
+            true;
 
         return this.header;
     }
@@ -493,88 +615,111 @@ class VLESSParser {
  * TCP Connect
  * ======================================================= */
 
-function timedConnect(hostname, port, timeout) {
-    return new Promise((resolve, reject) => {
-        let settled = false;
+function timedConnect(
+    hostname,
+    port,
+    timeout
+) {
+    return new Promise(
+        (resolve, reject) => {
+            let settled =
+                false;
 
-        const socket =
-            net.createConnection({
-                host: hostname,
-                port
-            });
+            const socket =
+                net.createConnection({
+                    host: hostname,
+                    port
+                });
 
-        const timer =
-            setTimeout(() => {
-                if (settled) {
-                    return;
+            const timer =
+                setTimeout(() => {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+
+                    try {
+                        socket.destroy();
+                    } catch (_) {}
+
+                    reject(
+                        new Error(
+                            `connect timeout: ${hostname}:${port}`
+                        )
+                    );
+                }, timeout);
+
+            socket.once(
+                'connect',
+                () => {
+                    if (settled) {
+                        return;
+                    }
+
+                    settled = true;
+
+                    clearTimeout(
+                        timer
+                    );
+
+                    try {
+                        socket.setNoDelay(
+                            SETTINGS.TCP_NODELAY
+                        );
+
+                        socket.setKeepAlive(
+                            SETTINGS.TCP_KEEPALIVE,
+                            SETTINGS.TCP_KEEPALIVE_DELAY
+                        );
+
+                        if (
+                            socket._readableState
+                        ) {
+                            socket._readableState.highWaterMark =
+                                SETTINGS.BUFFER_SIZE;
+                        }
+
+                        if (
+                            socket._writableState
+                        ) {
+                            socket._writableState.highWaterMark =
+                                SETTINGS.BUFFER_SIZE;
+                        }
+                    } catch (err) {
+                        log(
+                            'warn',
+                            `TCP socket tuning failed: ${err.message}`
+                        );
+                    }
+
+                    resolve(socket);
                 }
+            );
 
-                settled = true;
+            socket.once(
+                'error',
+                err => {
+                    if (settled) {
+                        return;
+                    }
 
-                try {
-                    socket.destroy();
-                } catch (_) {}
+                    settled = true;
 
-                reject(
-                    new Error(
-                        `connect timeout: ${hostname}:${port}`
-                    )
-                );
-            }, timeout);
+                    clearTimeout(
+                        timer
+                    );
 
-        socket.once('connect', () => {
-            if (settled) {
-                return;
-            }
-
-            settled = true;
-            clearTimeout(timer);
-
-            try {
-                socket.setNoDelay(
-                    SETTINGS.TCP_NODELAY
-                );
-
-                socket.setKeepAlive(
-                    SETTINGS.TCP_KEEPALIVE,
-                    SETTINGS.TCP_KEEPALIVE_DELAY
-                );
-
-                if (socket._readableState) {
-                    socket._readableState.highWaterMark =
-                        SETTINGS.BUFFER_SIZE;
+                    reject(err);
                 }
-
-                if (socket._writableState) {
-                    socket._writableState.highWaterMark =
-                        SETTINGS.BUFFER_SIZE;
-                }
-            } catch (err) {
-                log(
-                    'warn',
-                    `TCP socket tuning failed: ${err.message}`
-                );
-            }
-
-            resolve(socket);
-        });
-
-        socket.once('error', err => {
-            if (settled) {
-                return;
-            }
-
-            settled = true;
-            clearTimeout(timer);
-
-            reject(err);
-        });
-    });
+            );
+        }
+    );
 }
 
 
 /* =========================================================
- * Session Manager
+ * Sessions
  * ======================================================= */
 
 const sessions =
@@ -585,23 +730,27 @@ function getOrCreateSession(uuid) {
     let session =
         sessions.get(uuid);
 
-    if (session && !session.cleaned) {
+    if (
+        session &&
+        !session.cleaned
+    ) {
         return session;
     }
 
-    if (sessions.size >= SETTINGS.MAX_SESSIONS) {
-        /*
-         * 优先清理：
-         *
-         * 1. 没有 GET
-         * 2. 没有 remote
-         * 3. 最久没有活动
-         */
+    if (
+        sessions.size >=
+        SETTINGS.MAX_SESSIONS
+    ) {
+        let victim =
+            null;
 
-        let victim = null;
-        let victimScore = -Infinity;
+        let victimScore =
+            -Infinity;
 
-        for (const [id, current] of sessions) {
+        for (
+            const [id, current]
+            of sessions
+        ) {
             if (
                 current.cleaned ||
                 current.cleaning
@@ -609,17 +758,24 @@ function getOrCreateSession(uuid) {
                 continue;
             }
 
-            let score = 0;
+            let score =
+                0;
 
-            if (!current.downstreamStarted) {
+            if (
+                !current.downstreamStarted
+            ) {
                 score += 1000;
             }
 
-            if (!current.initialized) {
+            if (
+                !current.initialized
+            ) {
                 score += 500;
             }
 
-            if (!current.remote) {
+            if (
+                !current.remote
+            ) {
                 score += 500;
             }
 
@@ -628,17 +784,27 @@ function getOrCreateSession(uuid) {
                 current.lastActivity;
 
             score +=
-                Math.min(idle / 1000, 300);
+                Math.min(
+                    idle / 1000,
+                    300
+                );
 
-            if (score > victimScore) {
-                victimScore = score;
-                victim = id;
+            if (
+                score > victimScore
+            ) {
+                victimScore =
+                    score;
+
+                victim =
+                    id;
             }
         }
 
         if (victim) {
             const old =
-                sessions.get(victim);
+                sessions.get(
+                    victim
+                );
 
             if (old) {
                 log(
@@ -652,7 +818,10 @@ function getOrCreateSession(uuid) {
             }
         }
 
-        if (sessions.size >= SETTINGS.MAX_SESSIONS) {
+        if (
+            sessions.size >=
+            SETTINGS.MAX_SESSIONS
+        ) {
             throw new Error(
                 'too many sessions'
             );
@@ -682,45 +851,79 @@ function getOrCreateSession(uuid) {
 
 class Session {
     constructor(uuid) {
-        this.uuid = uuid;
+        this.uuid =
+            uuid;
 
-        this.remote = null;
+        this.remote =
+            null;
 
-        this.initialized = false;
-        this.initializing = false;
+        this.initialized =
+            false;
 
-        this.vlessHeader = null;
+        this.initializing =
+            false;
+
+        this.vlessHeader =
+            null;
+
         this.vlessParser =
             new VLESSParser(
                 CONFIG_UUID_BYTES
             );
 
-        this.downstreamRes = null;
-        this.downstreamStarted = false;
-        this.downstreamFinished = false;
+        this.downstreamRes =
+            null;
 
-        this.upstreamReq = null;
-        this.upstreamStarted = false;
-        this.upstreamEnded = false;
+        this.downstreamStarted =
+            false;
 
-        this.responseHeaderSent = false;
+        this.downstreamFinished =
+            false;
+
+        this.upstreamReq =
+            null;
+
+        this.upstreamStarted =
+            false;
+
+        this.upstreamEnded =
+            false;
+
+        this.responseHeaderSent =
+            false;
 
         this.lastActivity =
             Date.now();
 
-        this.cleaned = false;
-        this.cleaning = false;
+        this.cleaned =
+            false;
 
-        this.noDownstreamTimer = null;
+        this.cleaning =
+            false;
 
-        this.remoteEnded = false;
-        this.remoteErrored = false;
+        this.noDownstreamTimer =
+            null;
 
-        this.remoteDataHandler = null;
-        this.remoteEndHandler = null;
-        this.remoteErrorHandler = null;
+        this.remoteEnded =
+            false;
 
-        this.parserFinished = false;
+        this.remoteErrored =
+            false;
+
+        this.remoteDataHandler =
+            null;
+
+        this.remoteEndHandler =
+            null;
+
+        this.remoteErrorHandler =
+            null;
+
+        this.remoteCloseHandler =
+            null;
+
+        this.remoteStreamDataHandler =
+            null;
     }
 
 
@@ -731,12 +934,15 @@ class Session {
 
 
     clearNoDownstreamTimer() {
-        if (this.noDownstreamTimer) {
+        if (
+            this.noDownstreamTimer
+        ) {
             clearTimeout(
                 this.noDownstreamTimer
             );
 
-            this.noDownstreamTimer = null;
+            this.noDownstreamTimer =
+                null;
         }
     }
 
@@ -750,33 +956,34 @@ class Session {
         }
 
         this.noDownstreamTimer =
-            setTimeout(() => {
-                if (
-                    !this.cleaned &&
-                    !this.downstreamStarted
-                ) {
-                    log(
-                        'warn',
-                        `Session ${this.uuid} has no downstream`
-                    );
+            setTimeout(
+                () => {
+                    if (
+                        !this.cleaned &&
+                        !this.downstreamStarted
+                    ) {
+                        log(
+                            'warn',
+                            `Session ${this.uuid} has no downstream`
+                        );
 
-                    this.cleanup(
-                        'downstream_timeout'
-                    );
-                }
-            }, SETTINGS.SESSION_TIMEOUT);
+                        this.cleanup(
+                            'downstream_timeout'
+                        );
+                    }
+                },
+                SETTINGS.SESSION_TIMEOUT
+            );
     }
 
 
     attachDownstream(res) {
-        if (this.cleaned) {
+        if (
+            this.cleaned
+        ) {
             return false;
         }
 
-        /*
-         * 防止一个 session 被两个 GET
-         * 同时占用。
-         */
         if (
             this.downstreamRes &&
             this.downstreamRes !== res &&
@@ -800,83 +1007,82 @@ class Session {
 
         this.touch();
 
-        /*
-         * 不设置 Content-Length。
-         *
-         * HTTP/1.1 下 Node 会自动处理 chunked。
-         */
-        if (!res.headersSent) {
+        if (
+            !res.headersSent
+        ) {
             res.writeHead(
                 200,
                 createStreamHeaders()
             );
         }
 
-        /*
-         * 立即 flush header。
-         *
-         * 这可以让代理尽早确认 response 已经开始。
-         */
         if (
-            typeof res.flushHeaders === 'function'
+            typeof res.flushHeaders ===
+            'function'
         ) {
             try {
                 res.flushHeaders();
             } catch (_) {}
         }
 
-        res.on('close', () => {
-            /*
-             * close + writableFinished=false
-             * 才认为是异常关闭。
-             */
-            if (
-                !res.writableFinished &&
-                !this.downstreamFinished
-            ) {
+        res.on(
+            'close',
+            () => {
+                if (
+                    !res.writableFinished &&
+                    !this.downstreamFinished &&
+                    !this.cleaned
+                ) {
+                    log(
+                        'info',
+                        `Downstream closed: ${this.uuid}`
+                    );
+
+                    this.cleanup(
+                        'downstream_aborted'
+                    );
+                }
+            }
+        );
+
+        res.on(
+            'error',
+            err => {
+                if (
+                    this.cleaned
+                ) {
+                    return;
+                }
+
                 log(
-                    'info',
-                    `Downstream closed: ${this.uuid}`
+                    'warn',
+                    `Downstream error: ${err.message}`
                 );
 
                 this.cleanup(
-                    'downstream_aborted'
+                    'downstream_error'
                 );
             }
-        });
+        );
 
-        res.on('error', err => {
-            log(
-                'warn',
-                `Downstream error: ${err.message}`
-            );
+        res.on(
+            'finish',
+            () => {
+                this.downstreamFinished =
+                    true;
 
-            this.cleanup(
-                'downstream_error'
-            );
-        });
+                this.touch();
 
-        res.on('finish', () => {
-            this.downstreamFinished =
-                true;
-
-            this.touch();
-
-            /*
-             * response 正常完成。
-             *
-             * 如果 remote 也结束了，
-             * session 可以清理。
-             */
-            if (
-                this.remoteEnded ||
-                this.upstreamEnded
-            ) {
-                this.cleanup(
-                    'downstream_finished'
-                );
+                if (
+                    this.remoteEnded ||
+                    this.upstreamEnded
+                ) {
+                    this.cleanup(
+                        'downstream_finished'
+                    );
+                }
             }
-        });
+        );
 
         if (
             this.initialized &&
@@ -890,11 +1096,15 @@ class Session {
 
 
     async initializeFromParser() {
-        if (this.initialized) {
+        if (
+            this.initialized
+        ) {
             return true;
         }
 
-        if (this.initializing) {
+        if (
+            this.initializing
+        ) {
             return false;
         }
 
@@ -906,7 +1116,6 @@ class Session {
                 this.vlessParser.parse();
 
             if (!header) {
-                this.initializing = false;
                 return false;
             }
 
@@ -925,10 +1134,18 @@ class Session {
                     SETTINGS.CONNECT_TIMEOUT
                 );
 
-            log(
-                'info',
-                `Remote connected ${header.hostname}:${header.port}`
-            );
+            if (
+                this.cleaned
+            ) {
+                try {
+                    this.remote.destroy();
+                } catch (_) {}
+
+                this.remote =
+                    null;
+
+                return false;
+            }
 
             this.initialized =
                 true;
@@ -938,7 +1155,7 @@ class Session {
             this.attachRemoteEvents();
 
             /*
-             * VLESS response header。
+             * VLESS response header.
              */
             if (
                 this.downstreamRes &&
@@ -967,7 +1184,9 @@ class Session {
             }
 
             /*
-             * Header 后面的第一段数据。
+             * Send data that followed
+             * the VLESS header in the
+             * same POST chunk.
              */
             if (
                 header.data &&
@@ -978,7 +1197,9 @@ class Session {
                 );
             }
 
-            if (this.downstreamRes) {
+            if (
+                this.downstreamRes
+            ) {
                 this.startRemoteToDownstream();
             }
 
@@ -1002,7 +1223,9 @@ class Session {
 
 
     async feedUpstream(chunk) {
-        if (this.cleaned) {
+        if (
+            this.cleaned
+        ) {
             return;
         }
 
@@ -1015,10 +1238,9 @@ class Session {
 
         this.touch();
 
-        /*
-         * Header 尚未解析。
-         */
-        if (!this.initialized) {
+        if (
+            !this.initialized
+        ) {
             this.vlessParser.append(
                 chunk
             );
@@ -1030,23 +1252,11 @@ class Session {
                 return;
             }
 
-            /*
-             * parser 已经把 header 后
-             * 的剩余数据放进 header.data。
-             *
-             * initialize 会连接 remote
-             * 并发送第一段数据。
-             */
             await this.initializeFromParser();
 
             return;
         }
 
-        /*
-         * Header 已完成。
-         *
-         * 后面的 chunk 直接写 remote。
-         */
         await this.writeRemote(
             chunk
         );
@@ -1076,18 +1286,35 @@ class Session {
                 const socket =
                     this.remote;
 
-                socket.write(
-                    data,
+                let settled =
+                    false;
+
+                const done =
                     err => {
-                        if (err) {
-                            reject(err);
+                        if (settled) {
                             return;
                         }
 
-                        this.touch();
-                        resolve();
-                    }
-                );
+                        settled = true;
+
+                        if (err) {
+                            reject(err);
+                        } else {
+                            this.touch();
+                            resolve();
+                        }
+                    };
+
+                try {
+                    socket.write(
+                        data,
+                        err => {
+                            done(err);
+                        }
+                    );
+                } catch (err) {
+                    done(err);
+                }
             }
         );
     }
@@ -1107,12 +1334,12 @@ class Session {
         this.touch();
 
         /*
-         * POST 正常结束 ≠ session 结束。
+         * POST end means upstream
+         * request body ended.
          *
-         * VLESS/TCP 的下游仍然可能有数据。
-         *
-         * 所以这里只 half-close remote，
-         * 不 destroy。
+         * Half-close the remote TCP
+         * connection instead of immediately
+         * destroying the session.
          */
         if (
             this.remote &&
@@ -1128,11 +1355,9 @@ class Session {
             }
         }
 
-        /*
-         * 如果 remote 本身已经结束，
-         * 这时 session 才可以释放。
-         */
-        if (this.remoteEnded) {
+        if (
+            this.remoteEnded
+        ) {
             this.cleanup(
                 'upstream_and_remote_finished'
             );
@@ -1158,7 +1383,9 @@ class Session {
 
         this.remoteEndHandler =
             () => {
-                if (this.cleaned) {
+                if (
+                    this.cleaned
+                ) {
                     return;
                 }
 
@@ -1182,10 +1409,6 @@ class Session {
                     } catch (_) {}
                 }
 
-                /*
-                 * remote 已结束，
-                 * 不再需要 session。
-                 */
                 this.cleanup(
                     'remote_end'
                 );
@@ -1193,7 +1416,9 @@ class Session {
 
         this.remoteErrorHandler =
             err => {
-                if (this.cleaned) {
+                if (
+                    this.cleaned
+                ) {
                     return;
                 }
 
@@ -1205,13 +1430,26 @@ class Session {
                     `Remote error: ${err.message}`
                 );
 
-                /*
-                 * remote error 后继续保持
-                 * 一个死 session 没有意义。
-                 */
                 this.cleanup(
                     'remote_error'
                 );
+            };
+
+        this.remoteCloseHandler =
+            hadError => {
+                if (
+                    this.cleaned
+                ) {
+                    return;
+                }
+
+                if (
+                    hadError
+                ) {
+                    this.cleanup(
+                        'remote_close_error'
+                    );
+                }
             };
 
         remote.on(
@@ -1231,19 +1469,7 @@ class Session {
 
         remote.once(
             'close',
-            hadError => {
-                if (
-                    this.cleaned
-                ) {
-                    return;
-                }
-
-                if (hadError) {
-                    this.cleanup(
-                        'remote_close_error'
-                    );
-                }
-            }
+            this.remoteCloseHandler
         );
     }
 
@@ -1271,12 +1497,6 @@ class Session {
             return;
         }
 
-        /*
-         * response header。
-         *
-         * 如果 initialize 已经写过，
-         * 这里不会重复写。
-         */
         if (
             !this.responseHeaderSent &&
             this.vlessHeader
@@ -1297,17 +1517,12 @@ class Session {
             }
         }
 
-        /*
-         * 不再使用 remote.pipe(res)。
-         *
-         * 原因：
-         *
-         * session cleanup 时需要非常明确
-         * 地控制双方生命周期。
-         *
-         * 手工 data -> res 更容易处理
-         * Koyeb / Node 的半关闭。
-         */
+        if (
+            this.remoteStreamDataHandler
+        ) {
+            return;
+        }
+
         const onData =
             chunk => {
                 if (
@@ -1324,23 +1539,32 @@ class Session {
                     const ok =
                         res.write(chunk);
 
-                    /*
-                     * backpressure：
-                     * remote 暂停读取。
-                     */
                     if (!ok) {
                         remote.pause();
 
-                        res.once(
-                            'drain',
+                        const resume =
                             () => {
+                                res.removeListener(
+                                    'close',
+                                    resume
+                                );
+
                                 if (
                                     !this.cleaned &&
                                     !remote.destroyed
                                 ) {
                                     remote.resume();
                                 }
-                            }
+                            };
+
+                        res.once(
+                            'drain',
+                            resume
+                        );
+
+                        res.once(
+                            'close',
+                            resume
                         );
                     }
                 } catch (err) {
@@ -1355,20 +1579,11 @@ class Session {
                 }
             };
 
-        /*
-         * attachRemoteEvents 已经有一个 data
-         * listener 用于 touch。
-         *
-         * 这里增加真正的数据输出 listener。
-         */
         remote.on(
             'data',
             onData
         );
 
-        /*
-         * cleanup 时需要删除。
-         */
         this.remoteStreamDataHandler =
             onData;
     }
@@ -1392,9 +1607,6 @@ class Session {
 
         this.clearNoDownstreamTimer();
 
-        /*
-         * 从全局 sessions 删除。
-         */
         if (
             sessions.get(this.uuid) === this
         ) {
@@ -1404,7 +1616,8 @@ class Session {
         }
 
         /*
-         * 先停止 remote data -> response。
+         * Remove remote -> response
+         * listener first.
          */
         if (
             this.remote &&
@@ -1418,44 +1631,54 @@ class Session {
             } catch (_) {}
         }
 
-        /*
-         * 删除本 Session 添加的 remote listeners。
-         */
-        if (this.remote) {
+        if (
+            this.remote
+        ) {
             try {
-                if (this.remoteDataHandler) {
+                if (
+                    this.remoteDataHandler
+                ) {
                     this.remote.removeListener(
                         'data',
                         this.remoteDataHandler
                     );
                 }
 
-                if (this.remoteEndHandler) {
+                if (
+                    this.remoteEndHandler
+                ) {
                     this.remote.removeListener(
                         'end',
                         this.remoteEndHandler
                     );
                 }
 
-                if (this.remoteErrorHandler) {
+                if (
+                    this.remoteErrorHandler
+                ) {
                     this.remote.removeListener(
                         'error',
                         this.remoteErrorHandler
+                    );
+                }
+
+                if (
+                    this.remoteCloseHandler
+                ) {
+                    this.remote.removeListener(
+                        'close',
+                        this.remoteCloseHandler
                     );
                 }
             } catch (_) {}
         }
 
         /*
-         * response。
-         *
-         * 正常 cleanup 时 end。
-         *
-         * 不 destroy response，
-         * 避免 Node/Koyeb 把正常结束
-         * 变成异常 reset。
+         * End downstream gracefully.
          */
-        if (this.downstreamRes) {
+        if (
+            this.downstreamRes
+        ) {
             try {
                 if (
                     !this.downstreamRes.writableEnded &&
@@ -1470,9 +1693,11 @@ class Session {
         }
 
         /*
-         * remote。
+         * Destroy remote TCP.
          */
-        if (this.remote) {
+        if (
+            this.remote
+        ) {
             try {
                 if (
                     !this.remote.destroyed
@@ -1486,17 +1711,13 @@ class Session {
         }
 
         /*
-         * upstream request。
-         *
-         * 注意：
-         *
-         * 正常 end 的 req 不应该 destroy。
-         *
-         * cleanup 通常只在异常路径触发。
+         * Only destroy an incomplete
+         * upstream request.
          */
         if (
             this.upstreamReq &&
-            !this.upstreamEnded
+            !this.upstreamEnded &&
+            !this.upstreamReq.complete
         ) {
             try {
                 if (
@@ -1517,52 +1738,51 @@ class Session {
 
 
 /* =========================================================
- * Session 定时清理
+ * Session idle cleanup
  * ======================================================= */
 
 const sessionTimer =
-    setInterval(() => {
-        const now =
-            Date.now();
+    setInterval(
+        () => {
+            const now =
+                Date.now();
 
-        for (
-            const [uuid, session]
-            of sessions
-        ) {
-            if (
-                session.cleaned
+            for (
+                const [uuid, session]
+                of sessions
             ) {
-                sessions.delete(
-                    uuid
-                );
+                if (
+                    session.cleaned
+                ) {
+                    sessions.delete(
+                        uuid
+                    );
 
-                continue;
+                    continue;
+                }
+
+                const idle =
+                    now -
+                    session.lastActivity;
+
+                if (
+                    idle >
+                    SETTINGS.SESSION_TIMEOUT
+                ) {
+                    log(
+                        'warn',
+                        `Session idle timeout: ${uuid}`
+                    );
+
+                    session.cleanup(
+                        'idle_timeout'
+                    );
+                }
             }
+        },
+        15000
+    );
 
-            const idle =
-                now -
-                session.lastActivity;
-
-            if (
-                idle >
-                SETTINGS.SESSION_TIMEOUT
-            ) {
-                log(
-                    'warn',
-                    `Session idle timeout: ${uuid}`
-                );
-
-                session.cleanup(
-                    'idle_timeout'
-                );
-            }
-        }
-    }, 15000);
-
-
-/*
- * Node 进程退出时清掉 interval。
- */
 sessionTimer.unref?.();
 
 
@@ -1592,7 +1812,9 @@ function getNezhaDownloadUrl() {
 
 
 async function downloadNezha() {
-    if (!NEZHA_KEY) {
+    if (
+        !NEZHA_KEY
+    ) {
         return;
     }
 
@@ -1675,9 +1897,6 @@ function detectNezhaPort(server) {
         return '';
     }
 
-    /*
-     * [IPv6]:port
-     */
     if (
         server.startsWith('[')
     ) {
@@ -1691,19 +1910,14 @@ function detectNezhaPort(server) {
             : '';
     }
 
-    /*
-     * 普通 host:port。
-     */
     const match =
         server.match(
             /:(\d+)$/
         );
 
-    if (match) {
-        return match[1];
-    }
-
-    return '';
+    return match
+        ? match[1]
+        : '';
 }
 
 
@@ -1728,7 +1942,8 @@ function writeNezhaConfig() {
             ? 'true'
             : 'false';
 
-    const config = `
+    const config =
+        `
 client_secret: ${NEZHA_KEY}
 debug: false
 disable_auto_update: true
@@ -1788,10 +2003,6 @@ async function runNezha() {
                 'nezha-agent'
             );
 
-        /*
-         * v1：
-         * NEZHA_PORT 存在时直接使用 -s host:port -p key
-         */
         if (
             NEZHA_PORT
         ) {
@@ -1817,7 +2028,9 @@ async function runNezha() {
 
             if (
                 tlsPorts.has(
-                    String(NEZHA_PORT)
+                    String(
+                        NEZHA_PORT
+                    )
                 )
             ) {
                 args.push(
@@ -1845,9 +2058,6 @@ async function runNezha() {
             return;
         }
 
-        /*
-         * v0 / config.yaml
-         */
         const configPath =
             writeNezhaConfig();
 
@@ -1892,12 +2102,6 @@ async function addAccessTask() {
         const target =
             `https://${DOMAIN}`;
 
-        /*
-         * 不使用 shell 拼接 curl。
-         *
-         * 防止 DOMAIN 中的字符
-         * 被 shell 解释。
-         */
         const response =
             await axios.post(
                 'https://oooo.serv00.net/add-url',
@@ -1928,20 +2132,24 @@ async function addAccessTask() {
 
 
 /* =========================================================
- * IP / ISP
+ * Public IP / ISP
  * ======================================================= */
 
 async function getIP() {
     try {
-        const response = await axios.get(
-            'https://api4.ipify.org',
-            {
-                timeout: 3000,
-                responseType: 'text'
-            }
-        );
+        const response =
+            await axios.get(
+                'https://api4.ipify.org',
+                {
+                    timeout: 3000,
+                    responseType: 'text'
+                }
+            );
 
-        const ip = response.data.trim();
+        const ip =
+            String(
+                response.data
+            ).trim();
 
         if (ip) {
             return ip;
@@ -1954,15 +2162,19 @@ async function getIP() {
     }
 
     try {
-        const response = await axios.get(
-            'https://api6.ipify.org',
-            {
-                timeout: 3000,
-                responseType: 'text'
-            }
-        );
+        const response =
+            await axios.get(
+                'https://api6.ipify.org',
+                {
+                    timeout: 3000,
+                    responseType: 'text'
+                }
+            );
 
-        const ip = response.data.trim();
+        const ip =
+            String(
+                response.data
+            ).trim();
 
         if (ip) {
             return `[${ip}]`;
@@ -1992,14 +2204,6 @@ async function getISP() {
         const data =
             response.data || {};
 
-        /*
-         * Cloudflare meta 常见字段：
-         *
-         * asOrganization
-         * colo
-         *
-         * 优先组织名称。
-         */
         const isp =
             data.asOrganization ||
             data.asn ||
@@ -2024,18 +2228,18 @@ async function getISP() {
  * Subscription
  * ======================================================= */
 
-function buildVLESSURL(IP, ISP) {
+function buildVLESSURL(
+    IP,
+    ISP
+) {
     const sniHost =
         DOMAIN ||
         String(IP)
-            .replace(/^\[|\]$/g, '');
+            .replace(
+                /^\[|\]$/g,
+                ''
+            );
 
-    /*
-     * XHTTP stream-one。
-     *
-     * 注意：
-     * 这里不再使用 packet-up。
-     */
     const url =
         `vless://${UUID}@${IP}:443` +
         `?encryption=none` +
@@ -2054,18 +2258,13 @@ function buildVLESSURL(IP, ISP) {
 
 
 /* =========================================================
- * HTTP Server
+ * HTTP helpers
  * ======================================================= */
 
-let PUBLIC_IP =
-    DOMAIN || 'localhost';
-
-let ISP =
-    'Unknown';
-
-
 function send404(res) {
-    if (res.headersSent) {
+    if (
+        res.headersSent
+    ) {
         try {
             res.end();
         } catch (_) {}
@@ -2078,17 +2277,25 @@ function send404(res) {
         {
             'Content-Type':
                 'text/plain; charset=utf-8',
+
             'Cache-Control':
-                'no-store'
+                'no-store',
+
+            'Access-Control-Allow-Origin':
+                '*'
         }
     );
 
-    res.end('Not Found');
+    res.end(
+        'Not Found'
+    );
 }
 
 
 function send500(res) {
-    if (res.headersSent) {
+    if (
+        res.headersSent
+    ) {
         try {
             res.end();
         } catch (_) {}
@@ -2101,8 +2308,12 @@ function send500(res) {
         {
             'Content-Type':
                 'text/plain; charset=utf-8',
+
             'Cache-Control':
-                'no-store'
+                'no-store',
+
+            'Access-Control-Allow-Origin':
+                '*'
         }
     );
 
@@ -2112,19 +2323,44 @@ function send500(res) {
 }
 
 
+/* =========================================================
+ * Runtime state
+ * ======================================================= */
+
+let PUBLIC_IP =
+    DOMAIN || 'localhost';
+
+let ISP =
+    'Unknown';
+
+
+/* =========================================================
+ * HTTP Server
+ * ======================================================= */
+
 const server =
     http.createServer(
         async (req, res) => {
             /*
              * -------------------------------------------------
-             * 基础安全/生命周期处理
+             * Basic headers
              * -------------------------------------------------
              */
 
-            res.setHeader(
-                'Access-Control-Allow-Origin',
-                '*'
-            );
+            if (
+                !res.headersSent
+            ) {
+                res.setHeader(
+                    'Access-Control-Allow-Origin',
+                    '*'
+                );
+            }
+
+            /*
+             * -------------------------------------------------
+             * OPTIONS
+             * -------------------------------------------------
+             */
 
             if (
                 req.method === 'OPTIONS'
@@ -2132,14 +2368,22 @@ const server =
                 res.writeHead(
                     204,
                     {
-                        'Access-Control-Allow-Origin': '*',
-                        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                        'Access-Control-Allow-Headers': '*',
-                        'Cache-Control': 'no-store'
+                        'Access-Control-Allow-Origin':
+                            '*',
+
+                        'Access-Control-Allow-Methods':
+                            'GET, POST, OPTIONS',
+
+                        'Access-Control-Allow-Headers':
+                            '*',
+
+                        'Cache-Control':
+                            'no-store'
                     }
                 );
 
                 res.end();
+
                 return;
             }
 
@@ -2165,20 +2409,13 @@ const server =
                     'utf8',
                     (err, content) => {
                         if (err) {
-                            if (!res.headersSent) {
-                                res.writeHead(
-                                    500,
-                                    {
-                                        'Content-Type':
-                                            'text/plain; charset=utf-8'
-                                    }
-                                );
-                            }
+                            send500(res);
+                            return;
+                        }
 
-                            res.end(
-                                'Internal Server Error'
-                            );
-
+                        if (
+                            res.headersSent
+                        ) {
                             return;
                         }
 
@@ -2187,8 +2424,12 @@ const server =
                             {
                                 'Content-Type':
                                     'text/html; charset=utf-8',
+
                                 'Cache-Control':
-                                    'no-store'
+                                    'no-store',
+
+                                'Access-Control-Allow-Origin':
+                                    '*'
                             }
                         );
 
@@ -2220,7 +2461,9 @@ const server =
 
                 const base64 =
                     Buffer
-                        .from(vlessURL)
+                        .from(
+                            vlessURL
+                        )
                         .toString('base64');
 
                 res.writeHead(
@@ -2240,22 +2483,23 @@ const server =
              * -------------------------------------------------
              * XHTTP path
              *
-             * packet-up:
-             *
-             *   /xhttp/uuid/0
-             *   /xhttp/uuid/1
-             *
              * stream-one:
              *
-             *   /xhttp/uuid
+             * /XPATH/UUID
+             *
+             * No sequence number.
              * -------------------------------------------------
              */
 
             const expectedPrefix =
                 `/${XPATH}/`;
 
+            const urlWithoutQuery =
+                String(req.url || '')
+                    .split('?')[0];
+
             if (
-                !req.url.startsWith(
+                !urlWithoutQuery.startsWith(
                     expectedPrefix
                 )
             ) {
@@ -2263,22 +2507,18 @@ const server =
                 return;
             }
 
-            /*
-             * query string 不参与 UUID。
-             */
-            const urlWithoutQuery =
-                req.url.split('?')[0];
-
             const relative =
                 urlWithoutQuery.slice(
                     expectedPrefix.length
                 );
 
             /*
-             * stream-one 不接受 seq。
+             * stream-one does not accept:
              *
-             * UUID 必须是完整的一段。
+             * /XPATH/UUID/0
+             * /XPATH/UUID/1
              */
+
             if (
                 !relative ||
                 relative.includes('/')
@@ -2287,17 +2527,18 @@ const server =
                 return;
             }
 
-            const uuid =
-                decodeURIComponent(
-                    relative
-                );
+            let uuid;
 
+            try {
+                uuid =
+                    decodeURIComponent(
+                        relative
+                    );
+            } catch (_) {
+                send404(res);
+                return;
+            }
 
-            /*
-             * UUID 不直接相信 URL。
-             *
-             * XHTTP 路径 UUID 应该和配置 UUID 一致。
-             */
             if (
                 uuid !== UUID
             ) {
@@ -2328,12 +2569,17 @@ const server =
                         err.message
                     );
 
-                    if (!res.headersSent) {
+                    if (
+                        !res.headersSent
+                    ) {
                         res.writeHead(
                             503,
                             {
                                 'Content-Type':
-                                    'text/plain'
+                                    'text/plain',
+
+                                'Cache-Control':
+                                    'no-store'
                             }
                         );
                     }
@@ -2345,17 +2591,12 @@ const server =
                     return;
                 }
 
-                /*
-                 * req close。
-                 *
-                 * GET 本身如果客户端取消，
-                 * res 通常也会 close。
-                 */
                 req.on(
                     'aborted',
                     () => {
                         if (
-                            !res.writableFinished
+                            !res.writableFinished &&
+                            !session.cleaned
                         ) {
                             session.cleanup(
                                 'downstream_request_aborted'
@@ -2383,13 +2624,20 @@ const server =
                         res
                     );
 
-                if (!attached) {
-                    if (!res.headersSent) {
+                if (
+                    !attached
+                ) {
+                    if (
+                        !res.headersSent
+                    ) {
                         res.writeHead(
                             409,
                             {
                                 'Content-Type':
-                                    'text/plain'
+                                    'text/plain',
+
+                                'Cache-Control':
+                                    'no-store'
                             }
                         );
                     }
@@ -2409,19 +2657,8 @@ const server =
              * -------------------------------------------------
              * UPSTREAM POST
              *
-             * 真正的 stream-one：
-             *
-             * 一个 POST 请求持续承载：
-             *
-             * VLESS Header
-             * +
-             * TCP data
-             * +
-             * TCP data
-             * +
-             * TCP data
-             *
-             * 不再收集整个 body。
+             * One POST carries the entire
+             * stream-one upstream.
              * -------------------------------------------------
              */
 
@@ -2432,28 +2669,40 @@ const server =
 
                 try {
                     session =
-                        getOravailable'
+                        getOrCreateSession(
+                            uuid
+                        );
+                } catch (err) {
+                    log(
+                        'error',
+                        err.message
+                    );
+
+                    if (
+                        !res.headersSent
                     );
 
                     return;
                 }
 
                 /*
-                 * 一个 Session 对应一个 upstream。
-                 *
-                 * stream-one 不应该再产生第二个 POST。
+                 * Only one active POST may
+                 * belong to a session.
                  */
                 if (
                     session.upstreamStarted &&
                     session.upstreamReq &&
                     !session.upstreamEnded
                 ) {
-                    if (!res.headersSent) {
+                    if (
+                        !res.headersSent
+                    ) {
                         res.writeHead(
                             409,
                             {
                                 'Content-Type':
                                     'text/plain',
+
                                 'Cache-Control':
                                     'no-store'
                             }
@@ -2481,15 +2730,29 @@ const server =
                 let requestAborted =
                     false;
 
+                let receivedBytes =
+                    0;
+
                 /*
-                 * -------------------------------------------------
-                 * req data
-                 * -------------------------------------------------
+                 * Important:
+                 *
+                 * Do not use an async data
+                 * listener directly.
+                 *
+                 * Node may emit multiple data
+                 * events before previous awaits
+                 * have completed.
+                 *
+                 * Use a Promise chain so chunks
+                 * are processed strictly in order.
                  */
+
+                let processing =
+                    Promise.resolve();
 
                 req.on(
                     'data',
-                    async chunk => {
+                    chunk => {
                         if (
                             requestAborted ||
                             session.cleaned
@@ -2497,74 +2760,117 @@ const server =
                             return;
                         }
 
-                        try {
-                            /*
-                             * 暂停 request，
-                             * 等 remote.write 完成。
-                             *
-                             * 避免 Koyeb -> Node
-                             * 的高速 body 把内存打爆。
-                             */
-                            req.pause();
+                        receivedBytes +=
+                            chunk.length;
 
-                            await session.feedUpstream(
-                                chunk
-                            );
-
-                            if (
-                                !requestAborted &&
-                                !session.cleaned
-                            ) {
-                                req.resume();
-                            }
-                        } catch (err) {
-                            log(
-                                'error',
-                                `Upstream processing failed: ${err.message}`
-                            );
-
+                        if (
+                            SETTINGS.MAX_POST_SIZE > 0 &&
+                            receivedBytes >
+                            SETTINGS.MAX_POST_SIZE
+                        ) {
                             requestAborted =
                                 true;
 
                             session.cleanup(
-                                'upstream_processing_error'
+                                'post_size_limit'
                             );
 
-                            if (
-                                !responseEnded &&
-                                !res.headersSent
-                            ) {
-                                res.writeHead(
-                                    500,
-                                    {
-                                        'Content-Type':
-                                            'text/plain',
-                                        'Cache-Control':
-                                            'no-store'
+                            try {
+                                req.destroy();
+                            } catch (_) {}
+
+                            return;
+                        }
+
+                        try {
+                            req.pause();
+                        } catch (_) {}
+
+                        processing =
+                            processing
+                                .then(
+                                    async () => {
+                                        if (
+                                            requestAborted ||
+                                            session.cleaned
+                                        ) {
+                                            return;
+                                        }
+
+                                        await session.feedUpstream(
+                                            chunk
+                                        );
+                                    }
+                                )
+                                .catch(
+                                    err => {
+                                        log(
+                                            'error',
+                                            `Upstream processing failed: ${err.message}`
+                                        );
+
+                                        requestAborted =
+                                            true;
+
+                                        session.cleanup(
+                                            'upstream_processing_error'
+                                        );
+
+                                        if (
+                                            !responseEnded &&
+                                            !res.headersSent
+                                        ) {
+                                            responseEnded =
+                                                true;
+
+                                            res.writeHead(
+                                                500,
+                                                {
+                                                    'Content-Type':
+                                                        'text/plain',
+
+                                                    'Cache-Control':
+                                                        'no-store'
+                                                }
+                                            );
+
+                                            res.end(
+                                                'Upstream Error'
+                                            );
+                                        }
+                                    }
+                                )
+                                .finally(
+                                    () => {
+                                        if (
+                                            !requestAborted &&
+                                            !session.cleaned
+                                        ) {
+                                            try {
+                                                req.resume();
+                                            } catch (_) {}
+                                        }
                                     }
                                 );
-
-                                responseEnded =
-                                    true;
-
-                                res.end(
-                                    'Upstream Error'
-                                );
-                            }
-                        }
                     }
                 );
 
 
                 /*
-                 * -------------------------------------------------
-                 * POST end
-                 * -------------------------------------------------
+                 * POST complete.
+                 *
+                 * Wait until the final chunk
+                 * has reached the remote socket
+                 * before half-closing it.
                  */
 
                 req.on(
                     'end',
-                    () => {
+                    async () => {
+                        try {
+                            await processing;
+                        } catch (_) {}
+
                         if (
                             requestAborted ||
                             session.cleaned
@@ -2575,11 +2881,14 @@ const server =
                         session.endUpstream();
 
                         /*
-                         * POST 的 HTTP response
-                         * 只是确认 request 已经接收。
+                         * POST response is only the
+                         * acknowledgement of the HTTP
+                         * request body.
                          *
-                         * 真正的 VLESS 下行走 GET。
+                         * Downstream traffic continues
+                         * through the GET response.
                          */
+
                         if (
                             !responseEnded
                         ) {
@@ -2594,8 +2903,13 @@ const server =
                                     {
                                         'Content-Type':
                                             'application/octet-stream',
+
                                         'Cache-Control':
                                             'no-store',
+
+                                        'Access-Control-Allow-Origin':
+                                            '*',
+
                                         'X-Padding':
                                             generatePadding(
                                                 16,
@@ -2605,16 +2919,13 @@ const server =
                                 );
                             }
 
-                            res.end();
+                            if (
+                                !res.writableEnded
+                            ) {
+                                res.end();
+                            }
                         }
-                    }
-                );
-
-
-                /*
-                 * -------------------------------------------------
-                 * req aborted
-                 * -------------------------------------------------
+                                    * POST aborted.
                  */
 
                 req.on(
@@ -2642,9 +2953,7 @@ const server =
 
 
                 /*
-                 * -------------------------------------------------
-                 * req error
-                 * -------------------------------------------------
+                 * POST error.
                  */
 
                 req.on(
@@ -2661,10 +2970,7 @@ const server =
 
                         log(
                             'debug',
-                            `POST request error: ${err.message}`
-                        );
-
-                        session.cleanup(
+                            `POST request error: ${                        session.cleanup(
                             'upstream_request_error'
                         );
                     }
@@ -2672,14 +2978,11 @@ const server =
 
 
                 /*
-                 * -------------------------------------------------
-                 * req close
+                 * close does not automatically
+                 * mean an error.
                  *
-                 * close 本身不能直接等同于异常。
-                 *
-                 * req.complete=true 表示 HTTP request
-                 * 已完整接收。
-                 * -------------------------------------------------
+                 * req.complete means the complete
+                 * HTTP message was received.
                  */
 
                 req.on(
@@ -2700,8 +3003,10 @@ const server =
                                 `POST closed before complete: ${uuid}`
                             );
 
-                            session.cleanup(
-                                'upstream_incomplete_close'
+                            requestAborted =
+                                true;
+
+upstream_incomplete_close'
                             );
                         }
                     }
@@ -2713,7 +3018,7 @@ const server =
 
             /*
              * -------------------------------------------------
-             * 其它 Method
+             * Unsupported method
              * -------------------------------------------------
              */
 
@@ -2723,14 +3028,14 @@ const server =
 
 
 /* =========================================================
- * Node / Koyeb HTTP lifecycle
+ * Koyeb / Node HTTP lifecycle
  * ======================================================= */
 
 /*
- * Koyeb Edge 本身的连接/idle 限制
- * 不能由 Node 突破。
+ * Koyeb's external proxy has its own limits.
  *
- * 这里主要避免 Node 自己过早关闭。
+ * These settings only prevent Node itself
+ * from unnecessarily terminating connections.
  */
 
 server.keepAliveTimeout =
@@ -2740,17 +3045,17 @@ server.headersTimeout =
     70000;
 
 /*
- * 0 = 不限制 request body 时间。
+ * Disable Node's request timeout.
  *
- * Koyeb Edge 仍然有自己的限制。
+ * Long-running XHTTP sessions are managed
+ * by Session timeout instead.
  */
 server.requestTimeout =
     0;
 
 /*
- * socket inactivity timeout。
- *
- * 由 Session 层处理。
+ * Disable the generic socket inactivity
+ * timeout at the HTTP server layer.
  */
 server.timeout =
     0;
@@ -2760,8 +3065,9 @@ server.maxConnections =
 
 
 /*
- * HTTP server error
+ * HTTP server error.
  */
+
 server.on(
     'error',
     err => {
@@ -2774,8 +3080,9 @@ server.on(
 
 
 /*
- * connection 生命周期。
+ * Incoming connection tuning.
  */
+
 server.on(
     'connection',
     socket => {
@@ -2794,7 +3101,7 @@ server.on(
 
 
 /* =========================================================
- * Cleanup files
+ * Nezha cleanup
  * ======================================================= */
 
 function deleteNezhaFiles() {
@@ -2804,7 +3111,8 @@ function deleteNezhaFiles() {
     ];
 
     for (
-        const filename of files
+        const filename
+        of files
     ) {
         const file =
             path.join(
@@ -2829,7 +3137,9 @@ let shuttingDown =
 
 
 function shutdown(signal) {
-    if (shuttingDown) {
+    if (
+        shuttingDown
+    ) {
         return;
     }
 
@@ -2864,11 +3174,10 @@ function shutdown(signal) {
         }
     );
 
-    /*
-     * 防止某个 socket 永远不退出。
-     */
     setTimeout(
-        () => process.exit(1),
+        () => {
+            process.exit(1);
+        },
         5000
     ).unref();
 }
@@ -2876,26 +3185,39 @@ function shutdown(signal) {
 
 process.on(
     'SIGTERM',
-    () => shutdown('SIGTERM')
+    () => {
+        shutdown(
+            'SIGTERM'
+        );
+    }
 );
 
 process.on(
     'SIGINT',
-    () => shutdown('SIGINT')
+    () => {
+        shutdown(
+            'SIGINT'
+        );
+    }
 );
 
 
 /* =========================================================
- * 启动
+ * Bootstrap
  * ======================================================= */
 
 async function bootstrap() {
     try {
         /*
-         * 先获取订阅需要的信息。
+         * IMPORTANT:
+         *
+         * The original broken version called
+         * getPublicIP(), but the actual function
+         * is getIP().
          */
+
         PUBLIC_IP =
-            await getPublicIP();
+            await getIP();
 
         ISP =
             await getISP();
@@ -2911,8 +3233,9 @@ async function bootstrap() {
         );
 
         /*
-         * 启动 HTTP。
+         * Start HTTP server.
          */
+
         server.listen(
             PORT,
             '0.0.0.0',
@@ -2938,32 +3261,38 @@ async function bootstrap() {
                 );
 
                 /*
-                 * 后台启动 Nezha。
+                 * Start Nezha in background.
                  */
+
                 runNezha()
-                    .catch(err => {
-                        log(
-                            'error',
-                            `Nezha startup error: ${err.message}`
-                        );
-                    });
+                    .catch(
+                        err => {
+                            log(
+                                'error',
+                                `Nezha startup error: ${err.message}`
+                            );
+                        }
+                    );
 
                 /*
-                 * 自动 Access。
+                 * Automatic Access.
                  */
+
                 addAccessTask()
-                    .catch(err => {
-                        log(
-                            'error',
-                            `Access task error: ${err.message}`
-                        );
-                    });
+                    .catch(
+                        err => {
+                            log(
+                                'error',
+                                `Access task error: ${err.message}`
+                            );
+                        }
+                    );
 
                 /*
-                 * 原代码 5 分钟后删除文件。
-                 *
-                 * 保留这个行为。
+                 * Remove temporary Nezha
+                 * files after five minutes.
                  */
+
                 setTimeout(
                     deleteNezhaFiles,
                     300000
@@ -2979,5 +3308,9 @@ async function bootstrap() {
     }
 }
 
+
+/* =========================================================
+ * Start
+ * ======================================================= */
 
 bootstrap();
